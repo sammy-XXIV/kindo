@@ -8,15 +8,18 @@ const { getNimUsdRate, getBtcUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
 const orderStore = require('./orderStore')
-const { runMobileDataBridge } = require('./bridge')
+const { runBridge } = require('./bridge')
 
 const app = express()
 app.use(express.json())
 const PORT = process.env.PORT || 3001
 
-// MEXC's own USDC-on-Base withdrawal minimum (1 USDC + 0.1 fee), with a
-// buffer for trading spread/slippage across the NIM->USDT->USDC hops.
-const MIN_FULFILLABLE_USD = 1.5
+// MEXC's own USDC withdrawal minimums, with a buffer for trading
+// spread/slippage across the NIM->USDT->USDC hops: Base is 1 USDC + 0.1
+// fee (cheap network, small orders work); Solana is 20 USDC + 0.18 fee
+// (Purch/BRIJ only accept Solana, so only bigger orders clear it).
+const MIN_FULFILLABLE_USD_BASE = 1.5
+const MIN_FULFILLABLE_USD_SOLANA = 22
 const NIM_LUNA = 100000
 
 app.get('/api/shop/search', async (req, res) => {
@@ -28,17 +31,22 @@ app.get('/api/shop/search', async (req, res) => {
     // so a price-fetch hiccup can't strand a search we already paid for.
     const rate = await getNimUsdRate()
     const products = await searchProducts(query)
-    const mapped = products.map((p) => ({
-      id: p.id,
-      title: p.title,
-      priceNim: usdToNimSync(p.price, rate),
-      priceUsd: p.price,
-      imageUrl: p.imageUrl || null,
-      subtitle: p.vendor || p.source,
-      productUrl: p.productUrl,
-      rating: p.rating ?? null,
-      reviewCount: p.reviewCount ?? null,
-    }))
+    const mapped = products
+      // Real checkout only supports Amazon (via ASIN/productUrl) for now,
+      // and only orders that clear MEXC's Solana withdrawal floor can
+      // actually be fulfilled in real time.
+      .filter((p) => p.source === 'amazon' && p.price >= MIN_FULFILLABLE_USD_SOLANA)
+      .map((p) => ({
+        id: p.id,
+        title: p.title,
+        priceNim: usdToNimSync(p.price, rate),
+        priceUsd: p.price,
+        imageUrl: p.imageUrl || null,
+        subtitle: p.vendor || p.source,
+        productUrl: p.productUrl,
+        rating: p.rating ?? null,
+        reviewCount: p.reviewCount ?? null,
+      }))
     res.json({ products: mapped })
   } catch (err) {
     console.error('shop search failed:', err)
@@ -96,7 +104,7 @@ app.get('/api/utilities/mobile-data/search', async (req, res) => {
       const packages = (detail.packages || []).slice(3, 9) // mid-range denominations
       for (const pkg of packages) {
         const priceUsd = parseFloat(pkg.payment_price) * btcRate
-        if (priceUsd < MIN_FULFILLABLE_USD) continue // below MEXC's real-time withdrawal floor
+        if (priceUsd < MIN_FULFILLABLE_USD_BASE) continue // below MEXC's real-time withdrawal floor
         items.push({
           id: `${product.slug}-${pkg.package_value}`,
           title: `${detail.name} — ${pkg.package_currency} ${pkg.package_value}`,
@@ -133,6 +141,37 @@ app.post('/api/orders/mobile-data', (req, res) => {
   res.json(order)
 })
 
+// Registers a Shop order before payment — Purch's checkout needs the
+// product, real shipping address, and email once the customer's NIM lands.
+app.post('/api/orders/shop', (req, res) => {
+  const { orderId, productUrl, priceNim, priceUsd, shippingAddress, email } = req.body || {}
+  if (!orderId || !productUrl || !priceNim || !priceUsd || !shippingAddress || !email) {
+    return res.status(400).json({ error: 'missing_fields' })
+  }
+  const required = ['name', 'line1', 'city', 'state', 'zip', 'country', 'phone']
+  if (required.some((f) => !shippingAddress[f])) {
+    return res.status(400).json({ error: 'missing_shipping_fields' })
+  }
+  const expectedLuna = Math.round(priceNim * NIM_LUNA)
+  const order = orderStore.createOrder(orderId, {
+    type: 'shop',
+    item: { productUrl, priceUsd },
+    shippingAddress: {
+      name: shippingAddress.name,
+      line1: shippingAddress.line1,
+      line2: shippingAddress.line2 || undefined,
+      city: shippingAddress.city,
+      state: shippingAddress.state,
+      postalCode: shippingAddress.zip,
+      country: shippingAddress.country,
+      phone: shippingAddress.phone,
+    },
+    email,
+    expectedLuna,
+  })
+  res.json(order)
+})
+
 app.get('/api/orders/:orderId', (req, res) => {
   const order = orderStore.getOrder(req.params.orderId)
   if (!order) return res.status(404).json({ error: 'not_found' })
@@ -153,9 +192,7 @@ function startPaymentWatcher() {
         return
       }
       orderStore.updateOrder(orderId, { status: 'paid', receivedLuna: tx.value, paymentTxHash: tx.hash })
-      if (order.type === 'mobile-data') {
-        runMobileDataBridge(orderId).catch((err) => console.error(`bridge failed for ${orderId}:`, err))
-      }
+      runBridge(orderId).catch((err) => console.error(`bridge failed for ${orderId}:`, err))
     },
     onError: (err) => console.error('payment watcher error:', err),
   })

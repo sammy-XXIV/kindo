@@ -4,7 +4,7 @@ const { createX402Client } = require('x402-solana/client')
 
 const PURCH_BASE = 'https://api.purch.xyz'
 
-function getClient() {
+function getClient(maxUsdcAtomic = 50000) {
   const secretKey = process.env.SOLANA_SECRET_KEY
   if (!secretKey) throw new Error('SOLANA_SECRET_KEY not set')
   const keypair = Keypair.fromSecretKey(bs58.decode(secretKey))
@@ -18,7 +18,7 @@ function getClient() {
       },
     },
     network: 'solana',
-    amount: BigInt(50000), // safety cap: $0.05 USDC per call
+    amount: BigInt(maxUsdcAtomic),
   })
 }
 
@@ -35,4 +35,21 @@ async function searchProducts(query) {
   return data.products || []
 }
 
-module.exports = { searchProducts }
+// Places a real order (Amazon/Shopify) via Purch's dynamic-price checkout.
+// maxUsd caps what we'll let the real x402 payment be, since the exact
+// total (product + shipping) is only known once Purch prices this request.
+async function buyProduct({ productUrl, shippingAddress, email, maxUsd }) {
+  const client = getClient(Math.round(maxUsd * 1e6))
+  const res = await client.fetch(`${PURCH_BASE}/x402/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ productUrl, shippingAddress, email }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Purch buy failed (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+module.exports = { searchProducts, buyProduct }
