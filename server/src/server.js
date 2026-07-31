@@ -1,4 +1,5 @@
 require('dotenv').config()
+const path = require('path')
 const express = require('express')
 const { searchProducts } = require('./purchClient')
 const { searchFlights } = require('./brijClient')
@@ -161,6 +162,15 @@ function startPaymentWatcher() {
 }
 
 startPaymentWatcher()
+
+// Serves the built mini-app so the API and frontend are one Railway service
+// on one origin — the frontend's relative /api/... calls just work, same as
+// the Vite dev-server proxy does locally.
+const frontendDist = path.join(__dirname, '..', '..', 'mini-app', 'dist')
+app.use(express.static(frontendDist))
+app.use((req, res) => {
+  res.sendFile(path.join(frontendDist, 'index.html'))
+})
 
 app.listen(PORT, () => {
   console.log(`Kindo API listening on http://localhost:${PORT}`)
