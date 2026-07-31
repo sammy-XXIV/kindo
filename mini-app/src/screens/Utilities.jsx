@@ -11,6 +11,12 @@ const TOOLS = [
   { id: 'mobile-data', title: 'Mobile Data', description: 'Top up any phone, anywhere.' },
 ]
 
+// Matches Bitrefill's real requirement: a top-up only needs the recipient
+// phone number.
+const MOBILE_DATA_FIELDS = [
+  { key: 'phoneNumber', label: 'Phone number', placeholder: '+234 801 234 5678', type: 'tel' },
+]
+
 function Menu({ onPick, onBack }) {
   return (
     <>
@@ -197,7 +203,7 @@ function Utilities({ onBack }) {
     })
   }
 
-  async function registerMobileDataOrder({ orderId, item, extraValue }) {
+  async function registerMobileDataOrder({ orderId, item, extraValues }) {
     const res = await fetch('/api/orders/mobile-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -206,7 +212,7 @@ function Utilities({ onBack }) {
         productId: item.productId,
         packageValue: item.packageValue,
         priceNim: item.priceNim,
-        phoneNumber: extraValue,
+        phoneNumber: extraValues.phoneNumber,
       }),
     })
     if (!res.ok) throw new Error('Could not register order')
@@ -221,8 +227,7 @@ function Utilities({ onBack }) {
         heading="Whose phone are we topping up?"
         searchPlaceholder="e.g. MTN Nigeria"
         itemLabel="Top-up"
-        extraFieldLabel="Phone number"
-        extraFieldPlaceholder="+234 801 234 5678"
+        extraFields={MOBILE_DATA_FIELDS}
         receiptBrandSub="MOBILE DATA"
         stampText="TOPPED UP"
         beforePay={registerMobileDataOrder}

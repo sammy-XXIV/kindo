@@ -109,10 +109,9 @@ function SearchStep({
 function ConfirmStep({
   item,
   itemLabel,
-  extraFieldLabel,
-  extraFieldPlaceholder,
-  extraValue,
-  setExtraValue,
+  extraFields,
+  extraValues,
+  setExtraValues,
   onPay,
   onExpandImage,
   beforePay,
@@ -121,12 +120,14 @@ function ConfirmStep({
   const [status, setStatus] = useState('idle') // idle | paying | error
   const [errorMessage, setErrorMessage] = useState('')
 
+  const canPay = extraFields.every((f) => f.optional || extraValues[f.key]?.trim())
+
   async function handlePay() {
     setStatus('paying')
     setErrorMessage('')
     try {
       const orderId = `kindo-${Date.now()}`
-      if (beforePay) await beforePay({ orderId, item, extraValue })
+      if (beforePay) await beforePay({ orderId, item, extraValues })
       const txHash = await payWithNim({ amountNim: item.priceNim, orderId })
       onPay(txHash)
     } catch (err) {
@@ -193,19 +194,40 @@ function ConfirmStep({
         </div>
       </div>
 
-      <div className="field">
-        <label className="field-label" htmlFor="extra-field">
-          {extraFieldLabel}
-        </label>
-        <input
-          id="extra-field"
-          type="text"
-          className="field-input"
-          placeholder={extraFieldPlaceholder}
-          value={extraValue}
-          onChange={(e) => setExtraValue(e.target.value)}
-        />
-      </div>
+      {extraFields.map((f) => (
+        <div className="field" key={f.key}>
+          <label className="field-label" htmlFor={f.key}>
+            {f.label}
+            {f.optional && ' (optional)'}
+          </label>
+          {f.type === 'select' ? (
+            <select
+              id={f.key}
+              className="field-input"
+              value={extraValues[f.key] || ''}
+              onChange={(e) => setExtraValues((v) => ({ ...v, [f.key]: e.target.value }))}
+            >
+              <option value="" disabled>
+                {f.placeholder}
+              </option>
+              {f.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              id={f.key}
+              type={f.type || 'text'}
+              className="field-input"
+              placeholder={f.placeholder}
+              value={extraValues[f.key] || ''}
+              onChange={(e) => setExtraValues((v) => ({ ...v, [f.key]: e.target.value }))}
+            />
+          )}
+        </div>
+      ))}
 
       {status === 'error' && <p className="pay-error">{errorMessage}</p>}
 
@@ -213,7 +235,7 @@ function ConfirmStep({
         type="button"
         className="cta cta--block"
         onClick={handlePay}
-        disabled={status === 'paying'}
+        disabled={status === 'paying' || !canPay}
       >
         {status === 'paying' ? 'Waiting for confirmation…' : `Pay ${item.priceNim.toFixed(2)} NIM`}
       </button>
@@ -263,8 +285,7 @@ function PurchaseFlow({
   heading,
   searchPlaceholder,
   itemLabel,
-  extraFieldLabel,
-  extraFieldPlaceholder,
+  extraFields,
   receiptBrandSub,
   stampText,
   beforePay,
@@ -274,7 +295,7 @@ function PurchaseFlow({
   const [results, setResults] = useState([])
   const [hasSearched, setHasSearched] = useState(false)
   const [item, setItem] = useState(null)
-  const [extraValue, setExtraValue] = useState('')
+  const [extraValues, setExtraValues] = useState({})
   const [txHash, setTxHash] = useState(null)
   const [lightboxImage, setLightboxImage] = useState(null)
 
@@ -315,10 +336,9 @@ function PurchaseFlow({
         <ConfirmStep
           item={item}
           itemLabel={itemLabel}
-          extraFieldLabel={extraFieldLabel}
-          extraFieldPlaceholder={extraFieldPlaceholder}
-          extraValue={extraValue}
-          setExtraValue={setExtraValue}
+          extraFields={extraFields}
+          extraValues={extraValues}
+          setExtraValues={setExtraValues}
           onPay={(hash) => {
             setTxHash(hash)
             setStep('success')
