@@ -1,0 +1,52 @@
+:root {
+  --ink: #1f2348;
+  --ink-deep: #12142e;
+  --gold: #e9b213;
+  --gold-bright: #f4c430;
+  --paper: #f7f2e4;
+  --paper-line: #c9bfa0;
+  --mist: #9ea2c4;
+  --white: #ffffff;
+
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'Space Mono', ui-monospace, Consolas, monospace;
+
+  font: 18px/145% var(--display);
+  color-scheme: dark;
+  color: var(--white);
+  background: var(--ink);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
