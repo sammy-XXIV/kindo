@@ -56,12 +56,13 @@ function Menu({ onPick, onBack }) {
   )
 }
 
-function WeatherForm({ onSubmit, onBack }) {
+function WeatherForm({ onSubmit, onBack, submitting }) {
   const [city, setCity] = useState('')
   return (
     <ToolForm
       title="Weather"
       onBack={onBack}
+      submitting={submitting}
       onSubmit={() => onSubmit(getWeather(city))}
     >
       <input
@@ -75,7 +76,7 @@ function WeatherForm({ onSubmit, onBack }) {
   )
 }
 
-function CurrencyForm({ onSubmit, onBack }) {
+function CurrencyForm({ onSubmit, onBack, submitting }) {
   const [amount, setAmount] = useState('100')
   const [from, setFrom] = useState('USD')
   const [to, setTo] = useState('EUR')
@@ -83,6 +84,7 @@ function CurrencyForm({ onSubmit, onBack }) {
     <ToolForm
       title="Currency"
       onBack={onBack}
+      submitting={submitting}
       onSubmit={() => onSubmit(convertCurrency(amount, from, to))}
     >
       <input
@@ -112,12 +114,13 @@ function CurrencyForm({ onSubmit, onBack }) {
   )
 }
 
-function TranslateForm({ onSubmit, onBack }) {
+function TranslateForm({ onSubmit, onBack, submitting }) {
   const [text, setText] = useState('')
   return (
     <ToolForm
       title="Translate"
       onBack={onBack}
+      submitting={submitting}
       onSubmit={() => onSubmit(translateText(text))}
     >
       <input
@@ -131,7 +134,7 @@ function TranslateForm({ onSubmit, onBack }) {
   )
 }
 
-function ToolForm({ title, children, onSubmit, onBack }) {
+function ToolForm({ title, children, onSubmit, onBack, submitting }) {
   return (
     <>
       <div className="home-topbar">
@@ -154,8 +157,15 @@ function ToolForm({ title, children, onSubmit, onBack }) {
         }}
       >
         <div className="field-stack">{children}</div>
-        <button type="submit" className="cta cta--block">
-          Check for 0.05 NIM
+        <button type="submit" className="cta cta--block" disabled={submitting}>
+          {submitting ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              Checking…
+            </>
+          ) : (
+            'Check for 0.05 NIM'
+          )}
         </button>
       </form>
     </>
@@ -195,12 +205,16 @@ function Result({ data, onAgain, onDone }) {
 function Utilities({ onBack }) {
   const [step, setStep] = useState('menu')
   const [result, setResult] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
 
   function handleSubmit(promise) {
-    promise.then((data) => {
-      setResult(data)
-      setStep('result')
-    })
+    setSubmitting(true)
+    promise
+      .then((data) => {
+        setResult(data)
+        setStep('result')
+      })
+      .finally(() => setSubmitting(false))
   }
 
   async function registerMobileDataOrder({ orderId, item, extraValues }) {
@@ -240,13 +254,13 @@ function Utilities({ onBack }) {
       {step === 'menu' && <Menu onPick={setStep} onBack={onBack} />}
 
       {step === 'weather' && (
-        <WeatherForm onSubmit={handleSubmit} onBack={() => setStep('menu')} />
+        <WeatherForm onSubmit={handleSubmit} onBack={() => setStep('menu')} submitting={submitting} />
       )}
       {step === 'currency' && (
-        <CurrencyForm onSubmit={handleSubmit} onBack={() => setStep('menu')} />
+        <CurrencyForm onSubmit={handleSubmit} onBack={() => setStep('menu')} submitting={submitting} />
       )}
       {step === 'translate' && (
-        <TranslateForm onSubmit={handleSubmit} onBack={() => setStep('menu')} />
+        <TranslateForm onSubmit={handleSubmit} onBack={() => setStep('menu')} submitting={submitting} />
       )}
 
       {step === 'result' && result && (

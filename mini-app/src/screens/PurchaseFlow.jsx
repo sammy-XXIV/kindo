@@ -22,6 +22,7 @@ function SearchStep({
   setQuery,
   results,
   hasSearched,
+  isSearching,
   onSearch,
   onPick,
   onExpandImage,
@@ -54,9 +55,10 @@ function SearchStep({
           placeholder={searchPlaceholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          disabled={isSearching}
         />
-        <button type="submit" className="search-submit">
-          Search
+        <button type="submit" className="search-submit" disabled={isSearching}>
+          {isSearching ? <span className="spinner" aria-hidden="true" /> : 'Search'}
         </button>
       </form>
 
@@ -237,7 +239,14 @@ function ConfirmStep({
         onClick={handlePay}
         disabled={status === 'paying' || !canPay}
       >
-        {status === 'paying' ? 'Waiting for confirmation…' : `Pay ${item.priceNim.toFixed(2)} NIM`}
+        {status === 'paying' ? (
+          <>
+            <span className="spinner" aria-hidden="true" />
+            Waiting for confirmation…
+          </>
+        ) : (
+          `Pay ${item.priceNim.toFixed(2)} NIM`
+        )}
       </button>
     </>
   )
@@ -294,16 +303,20 @@ function PurchaseFlow({
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [hasSearched, setHasSearched] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
   const [item, setItem] = useState(null)
   const [extraValues, setExtraValues] = useState({})
   const [txHash, setTxHash] = useState(null)
   const [lightboxImage, setLightboxImage] = useState(null)
 
   function handleSearch() {
-    fetchItems(query).then((items) => {
-      setResults(items)
-      setHasSearched(true)
-    })
+    setIsSearching(true)
+    fetchItems(query)
+      .then((items) => {
+        setResults(items)
+        setHasSearched(true)
+      })
+      .finally(() => setIsSearching(false))
   }
 
   useEffect(() => {
@@ -322,6 +335,7 @@ function PurchaseFlow({
           setQuery={setQuery}
           results={results}
           hasSearched={hasSearched}
+          isSearching={isSearching}
           onSearch={handleSearch}
           onPick={(p) => {
             setItem(p)
