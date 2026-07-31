@@ -1,7 +1,11 @@
 const fs = require('fs')
 const path = require('path')
 
-const FILE = path.join(__dirname, '..', 'orders.json')
+// DATA_DIR points at Railway's persistent volume in production (mounted at
+// /data) so orders survive redeploys/restarts — the container filesystem
+// otherwise resets on every deploy. Falls back to the repo dir locally.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..')
+const FILE = path.join(DATA_DIR, 'orders.json')
 
 function readAll() {
   if (!fs.existsSync(FILE)) return {}
