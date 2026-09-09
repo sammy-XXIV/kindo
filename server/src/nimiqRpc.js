@@ -1,4 +1,4 @@
-const { getAccountByAddress, getBlockNumber, getTransactionsByAddress, pushTransaction } = require('nimiq-rpc-client-ts/http')
+const { getAccountByAddress, getBlockNumber, pushTransaction } = require('nimiq-rpc-client-ts/http')
 
 const RPC_URL = process.env.NIMIQ_RPC_URL || 'https://rpc.nimiqwatch.com'
 
@@ -19,9 +19,27 @@ async function getCurrentBlockNumber() {
 }
 
 async function getRecentTransactions(address, max = 10) {
-  const [success, error, result] = await getTransactionsByAddress({ address, max }, opts())
-  if (!success) throw new Error(`getTransactionsByAddress failed: ${error}`)
-  return result
+  // The nimiq-rpc-client-ts build here is out of sync with the current
+  // Albatross RPC: getTransactionsByAddress now takes 3 positional params
+  // [address, max, startAt] and wraps its result as { data: [...] }. The
+  // library sends 2 params and expects a bare array, so it throws on every
+  // call — which silently breaks payment detection. Call the RPC directly.
+  const res = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTransactionsByAddress',
+      params: [address, max, null],
+    }),
+  })
+  const json = await res.json()
+  if (json.error) {
+    throw new Error(`getTransactionsByAddress failed: ${json.error.message || JSON.stringify(json.error)}`)
+  }
+  const result = json.result
+  return Array.isArray(result) ? result : result?.data || []
 }
 
 // sendRawTransaction on this RPC accepts and hashes malformed/invalid
