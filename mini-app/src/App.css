@@ -1,5 +1,5 @@
-/* Nimiq Pay only runs on phones: one column, centered on whatever
-   screen views it, dark navy throughout — cards are placement, not new bg. */
+/* Nimiq Pay only runs on phones: one column on a warm near-black terminal
+   casing. The paper receipt is the content; cards are flat panels, not glass. */
 
 .page {
   position: relative;
@@ -7,11 +7,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  background:
-    radial-gradient(120% 40% at 50% 0%, rgba(233, 178, 19, 0.1), transparent 65%),
-    var(--ink);
+  background: linear-gradient(180deg, var(--ink-deep), var(--ink) 22%);
   min-height: 100svh;
-  overflow-x: hidden;
+  overflow-x: clip; /* clip (not hidden) so it doesn't break the sticky top bar */
 }
 
 .page > * {
@@ -20,9 +18,11 @@
 }
 
 .wordmark {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  font-family: var(--logo);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
   color: var(--gold);
 }
 
@@ -34,10 +34,15 @@
 /* ---------- Home / Placeholder topbar ---------- */
 
 .home-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 28px 0;
+  padding: 18px 28px 14px;
+  background: var(--ink);
+  box-shadow: 0 10px 22px -14px rgba(0, 0, 0, 0.8);
 }
 
 .text-button {
@@ -60,80 +65,244 @@
 }
 
 .home-header h2 {
-  font-size: 26px;
-  line-height: 1.2;
-  font-weight: 700;
+  font-family: var(--serif);
+  font-size: 27px;
+  line-height: 1.15;
+  letter-spacing: -0.3px;
+  font-weight: 800;
   color: var(--white);
   margin: 0;
 }
 
-/* ---------- Nav cards (Home screen) ---------- */
+/* ---------- Utilities: printed service directory ---------- */
 
-.nav-list {
+.dir-list {
   display: flex;
   flex-direction: column;
-  gap: 26px;
-  padding: 20px 28px 40px;
+  padding: 10px 28px 44px;
 }
 
-.nav-card {
-  display: flex;
+.dir-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 18px;
   width: 100%;
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  color: var(--white);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 16px;
-  padding: 20px 22px;
+  padding: 20px 2px;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--line);
   font-family: inherit;
   text-align: left;
+  color: var(--white);
   cursor: pointer;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
-  will-change: transform, opacity;
 }
 
-.nav-card:active {
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+.dir-row:last-child {
+  border-bottom: 1px dashed var(--line);
 }
 
-.nav-card-text {
+.dir-row:active .dir-title,
+.dir-row:active .dir-arrow {
+  color: var(--gold);
+}
+
+.dir-index {
+  font-family: var(--logo);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.2px rgba(233, 178, 19, 0.5);
+}
+
+.dir-body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
-.nav-card-kicker {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--gold);
-  opacity: 0.85;
-}
-
-.nav-card-title {
-  font-size: 19px;
+.dir-title {
+  font-family: var(--serif);
+  font-size: 25px;
   font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.05;
   color: var(--white);
+  transition: color 0.15s ease;
 }
 
-.nav-card-desc {
-  font-size: 13px;
+.dir-desc {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.4px;
   color: var(--mist);
 }
 
-.nav-card-arrow {
-  font-size: 20px;
+.dir-arrow {
+  font-family: var(--mono);
+  font-size: 18px;
   font-weight: 700;
   color: var(--gold);
-  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+/* ---------- Home: swipeable pass deck ---------- */
+
+.swipe-track {
+  display: flex;
+  gap: 16px;
+  padding: 14px 9% 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.swipe-track::-webkit-scrollbar {
+  display: none;
+}
+
+.pass-card {
+  position: relative;
+  flex: 0 0 82%;
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  min-height: 60svh;
+  padding: 26px 24px 24px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--white);
+  cursor: pointer;
+  border: 2px solid rgba(233, 178, 19, 0.45);
+  border-radius: 16px;
+  background:
+    radial-gradient(130% 90% at 100% -10%, rgba(233, 178, 19, 0.12), transparent 55%),
+    linear-gradient(158deg, #1d1e26 0%, #101015 78%);
+  box-shadow: 0 22px 44px -22px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.pass-card:active {
+  transform: scale(0.98);
+  border-color: var(--gold);
+}
+
+/* Foil chip — the membership-card cue */
+.pass-corner {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  width: 34px;
+  height: 26px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--gold-bright), #b8890d);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Embossed, outlined index numeral */
+.pass-index {
+  position: absolute;
+  top: 16px;
+  right: 22px;
+  font-family: var(--logo);
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(233, 178, 19, 0.55);
+}
+
+.pass-head {
+  margin-top: 44px;
+}
+
+.pass-kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  color: var(--gold);
+}
+
+.pass-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-bottom: 22px;
+}
+
+.pass-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(28px, 9vw, 36px);
+  line-height: 1.02;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--white);
+  overflow-wrap: break-word;
+}
+
+.pass-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--mist);
+  max-width: 22ch;
+}
+
+.pass-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(233, 178, 19, 0.28);
+}
+
+.pass-serial {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--mist);
+}
+
+.pass-cue {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+
+/* Pagination */
+.swipe-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 0 40px;
+}
+
+.swipe-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--line);
+  cursor: pointer;
+  transition: background 0.2s ease, width 0.2s ease;
+}
+
+.swipe-dot.is-active {
+  width: 22px;
+  border-radius: 4px;
+  background: var(--gold);
 }
 
 /* ---------- Placeholder screen ---------- */
@@ -144,7 +313,9 @@
 }
 
 .placeholder-body h2 {
-  font-size: 24px;
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 800;
   color: var(--white);
   margin: 0 0 12px;
 }
@@ -178,10 +349,11 @@
 }
 
 .hero-island h1 {
-  font-size: 32px;
-  line-height: 1.14;
-  letter-spacing: -0.7px;
-  font-weight: 700;
+  font-family: var(--serif);
+  font-size: 34px;
+  line-height: 1.08;
+  letter-spacing: -0.4px;
+  font-weight: 800;
   margin: 0 0 16px;
   color: var(--white);
   max-width: 12ch;
@@ -195,26 +367,34 @@
   max-width: 34ch;
 }
 
+/* Primary actions read as physical keys on the terminal: crisp ink outline +
+   the same hard-offset shadow the receipt stub casts, and they press down on
+   tap. Ties the buttons to the receipt metaphor instead of floating gold pills. */
 .cta {
   font: inherit;
   font-weight: 700;
   font-size: 16px;
   padding: 15px 30px;
-  border-radius: 8px;
-  border: 2px solid var(--gold);
+  border-radius: 5px;
+  border: 2px solid var(--ink-deep);
   background: var(--gold);
   color: var(--ink-deep);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  box-shadow: 4px 4px 0 var(--ink-deep);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
 }
 
 .cta:active {
   background: var(--gold-bright);
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--ink-deep);
 }
 
 .cta:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: 4px 4px 0 var(--ink-deep);
 }
 
 .pay-error {
@@ -319,16 +499,17 @@
   width: 78px;
   height: 78px;
   margin: 2px auto 0;
-  border: 3px solid var(--gold);
+  border: 2.5px solid var(--stamp);
   border-radius: 50%;
   transform: rotate(-8deg);
+  opacity: 0.9;
 }
 
 .stub-stamp span {
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: var(--gold);
+  color: var(--stamp);
   text-align: center;
 }
 
@@ -389,7 +570,7 @@
 
 .mini-stub-kicker {
   display: block;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: 2px;
   color: var(--paper-line);
   margin-bottom: 8px;
@@ -440,7 +621,10 @@
 
 .service-copy h3 {
   margin: 0 0 6px;
-  font-size: 20px;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
   color: var(--white);
 }
 
@@ -464,23 +648,32 @@
 
 /* ---------- Shop: search ---------- */
 
+/* One integrated field: dark panel, gold icon key on the right. */
 .search-bar {
   display: flex;
-  gap: 10px;
-  padding: 8px 28px 0;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 28px 0;
+  padding: 5px 5px 5px 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.search-bar:focus-within {
+  border-color: var(--gold);
 }
 
 .search-input {
   flex: 1;
+  min-width: 0; /* let it shrink so the submit button stays on screen */
   font: inherit;
   font-size: 15px;
   color: var(--white);
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  padding: 13px 16px;
+  background: transparent;
+  border: none;
+  padding: 12px 0;
 }
 
 .search-input::placeholder {
@@ -488,20 +681,25 @@
 }
 
 .search-input:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 1px;
+  outline: none;
 }
 
 .search-submit {
-  font: inherit;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 0 20px;
-  border-radius: 10px;
-  border: 2px solid var(--gold);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 42px;
+  border-radius: 8px;
+  border: 2px solid var(--ink-deep);
   background: var(--gold);
   color: var(--ink-deep);
   cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.search-submit:active {
+  background: var(--gold-bright);
 }
 
 .product-list {
@@ -513,23 +711,28 @@
 
 .product-item {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 13px;
   width: 100%;
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--panel);
+  border: 2px solid var(--line);
   border-radius: 12px;
-  padding: 14px 18px;
+  padding: 16px 18px;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .product-item:active {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--panel-active);
+  border-color: var(--gold);
+}
+
+.product-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .product-thumb {
@@ -537,11 +740,16 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  font-size: 22px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  width: 50px;
+  height: 50px;
+  font-size: 24px;
+  /* letter thumbs render as gold serif monograms; emoji + images are unaffected */
+  font-family: var(--serif);
+  font-weight: 800;
+  color: var(--gold);
+  background: linear-gradient(150deg, #24252f, var(--ink-deep));
+  border: 2px solid var(--line);
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -551,21 +759,175 @@
   object-fit: cover;
 }
 
+/* Big product photo for store results — the image leads the card. */
+.product-hero {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+  cursor: zoom-in;
+}
+
+.product-hero img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+
 .product-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.product-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-rating {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--gold);
+}
+
+.product-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 13px;
+  border-top: 1px dashed var(--line);
+}
+
+.product-cue {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+.product-chevron {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.product-price-unit {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* Non-image results (airtime, dining): the card layout, minus the box.
+   Info stacked over the price (so titles keep full width), cards separated by
+   dashed rules instead of borders. */
+.product-list--dir {
+  gap: 0;
+  padding: 8px 28px 44px;
+}
+
+.product-list--dir .product-item {
+  padding: 18px 2px;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--line);
+  border-radius: 0;
+}
+
+.product-list--dir .product-item:last-child {
+  border-bottom: 1px dashed var(--line);
+}
+
+.product-list--dir .product-item:active {
+  background: none;
+}
+
+.product-list--dir .product-item:active .product-title,
+.product-list--dir .product-item:active .product-price {
+  color: var(--gold);
+}
+
+/* No inner divider — the row separators already carry the rule. */
+.product-list--dir .product-foot {
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Store results: same boxless treatment — big image, info, price, separated by
+   dashed rules instead of a card panel. */
+.product-list--store {
+  gap: 0;
+  padding: 8px 28px 44px;
+}
+
+.product-list--store .product-item {
+  padding: 22px 0;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--line);
+  border-radius: 0;
+}
+
+.product-list--store .product-item:first-child {
+  border-top: none;
+  padding-top: 6px;
+}
+
+.product-list--store .product-item:active {
+  background: none;
+}
+
+.product-list--store .product-item:active .product-title,
+.product-list--store .product-item:active .product-price {
+  color: var(--gold);
+}
+
+.product-list--store .product-foot {
+  padding-top: 4px;
+  border-top: none;
 }
 
 .product-title {
-  font-size: 15.5px;
+  font-family: var(--serif);
+  font-size: 18px;
   font-weight: 700;
+  letter-spacing: -0.2px;
   color: var(--white);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Store products lead with a big photo and a two-line name (long titles). */
+.product-item--image .product-title {
+  white-space: normal;
+  text-overflow: clip;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.15;
 }
 
 .product-price {
+  display: flex;
+  align-items: center;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
   color: var(--gold);
 }
 
@@ -582,9 +944,9 @@
   width: 84px;
   height: 84px;
   font-size: 40px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
+  background: var(--ink-deep);
+  border: 2px solid var(--line);
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -635,31 +997,47 @@
 
 .confirm-summary {
   margin: 24px 28px 0;
-  padding: 18px 20px;
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
+  padding: 4px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 10px;
 }
 
 .confirm-row {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  font-size: 14px;
-  padding: 8px 0;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.confirm-row > span:first-child {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
   color: var(--mist);
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+.confirm-row > span:last-child {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--white);
+  text-align: right;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .confirm-row:last-child {
   border-bottom: none;
 }
 
-.confirm-row--total {
-  color: var(--white);
-  font-weight: 700;
+.confirm-row--total > span:last-child {
   font-size: 16px;
+  font-weight: 700;
+  color: var(--gold);
 }
 
 .field {
@@ -681,11 +1059,9 @@
   font: inherit;
   font-size: 15px;
   color: var(--white);
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 8px;
   padding: 13px 16px;
 }
 
@@ -707,11 +1083,15 @@
 .field-row .field-input {
   width: auto;
   flex: 1;
+  min-width: 0;
 }
 
 .product-subtitle {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--mist);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stub-answer {

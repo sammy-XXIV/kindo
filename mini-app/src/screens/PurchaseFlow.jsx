@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import RevealItem from '../components/RevealItem'
-import { payWithNim } from '../lib/nimiqPay'
+import { payWithNim, isDemoMode, payDemo } from '../lib/nimiqPay'
 
 // Shared search → confirm → pay → receipt shape used by Shop, Flights,
 // and Restaurants — only copy, mock data, and labels differ per feature.
@@ -57,44 +57,67 @@ function SearchStep({
           onChange={(e) => setQuery(e.target.value)}
           disabled={isSearching}
         />
-        <button type="submit" className="search-submit" disabled={isSearching}>
-          {isSearching ? <span className="spinner" aria-hidden="true" /> : 'Search'}
+        <button type="submit" className="search-submit" aria-label="Search" disabled={isSearching}>
+          {isSearching ? (
+            <span className="spinner" aria-hidden="true" />
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2.6" />
+              <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+            </svg>
+          )}
         </button>
       </form>
 
-      <div className="product-list">
+      <div className={`product-list ${results[0]?.imageUrl ? 'product-list--store' : 'product-list--dir'}`}>
         {results.map((item) => (
           <RevealItem
             as="button"
             type="button"
-            className="product-item"
+            className={`product-item${item.imageUrl ? ' product-item--image' : ''}`}
             key={item.id}
             onClick={() => onPick(item)}
           >
-            <span
-              className="product-thumb"
-              aria-hidden="true"
-              onClick={
-                item.imageUrl
-                  ? (e) => {
-                      e.stopPropagation()
-                      onExpandImage(item.imageUrl)
-                    }
-                  : undefined
-              }
-            >
-              {item.imageUrl ? <img src={item.imageUrl} alt="" /> : item.thumb}
-            </span>
-            <span className="product-text">
-              <span className="product-title">{item.title}</span>
-              {(item.subtitle || item.rating) && (
-                <span className="product-subtitle">
-                  {item.subtitle}
-                  {item.subtitle && item.rating ? ' · ' : ''}
-                  {item.rating && `★ ${item.rating.toFixed(1)}${item.reviewCount ? ` (${item.reviewCount})` : ''}`}
+            {item.imageUrl && (
+              <span
+                className="product-hero"
+                aria-hidden="true"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onExpandImage(item.imageUrl)
+                }}
+              >
+                <img src={item.imageUrl} alt="" />
+              </span>
+            )}
+            <span className="product-top">
+              {!item.imageUrl && (
+                <span className="product-thumb" aria-hidden="true">
+                  {item.thumb}
                 </span>
               )}
-              <span className="product-price">{item.priceNim.toFixed(2)} NIM</span>
+              <span className="product-text">
+                <span className="product-title-row">
+                  <span className="product-title">{item.title}</span>
+                  {item.rating && (
+                    <span className="product-rating" aria-hidden="true">
+                      &#9733; {item.rating.toFixed(1)}
+                    </span>
+                  )}
+                </span>
+                {item.subtitle && <span className="product-subtitle">{item.subtitle}</span>}
+              </span>
+            </span>
+            <span className="product-foot">
+              <span className="product-cue">Pay in NIM</span>
+              <span className="product-price">
+                {item.priceNim.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                <span className="product-price-unit">NIM</span>
+                <span className="product-chevron" aria-hidden="true">&rarr;</span>
+              </span>
             </span>
           </RevealItem>
         ))}
@@ -130,7 +153,9 @@ function ConfirmStep({
     try {
       const orderId = `kindo-${Date.now()}`
       if (beforePay) await beforePay({ orderId, item, extraValues })
-      const txHash = await payWithNim({ amountNim: item.priceNim, orderId })
+      const txHash = (await isDemoMode())
+        ? await payDemo(orderId)
+        : await payWithNim({ amountNim: item.priceNim, orderId })
       onPay(txHash)
     } catch (err) {
       setStatus('error')

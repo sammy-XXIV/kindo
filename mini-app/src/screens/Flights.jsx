@@ -35,6 +35,23 @@ const PASSENGER_FIELDS = [
   { key: 'phoneNumber', label: 'Phone number', placeholder: '+234 801 234 5678', type: 'tel' },
 ]
 
+// Registers the flight order (passenger details) before payment, so the
+// backend has what a real ticket issue would need once the NIM lands.
+async function registerFlightOrder({ orderId, item, extraValues }) {
+  const res = await fetch('/api/orders/flights', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderId,
+      priceNim: item.priceNim,
+      offerId: item.id,
+      route: item.title,
+      passenger: extraValues,
+    }),
+  })
+  if (!res.ok) throw new Error('Could not register flight order')
+}
+
 function Flights({ onBack }) {
   return (
     <PurchaseFlow
@@ -47,6 +64,7 @@ function Flights({ onBack }) {
       extraFields={PASSENGER_FIELDS}
       receiptBrandSub="FLIGHTS"
       stampText="BOARDING PASS"
+      beforePay={registerFlightOrder}
     />
   )
 }

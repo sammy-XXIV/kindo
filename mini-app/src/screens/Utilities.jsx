@@ -32,21 +32,23 @@ function Menu({ onPick, onBack }) {
         <h2>What do you need to know?</h2>
       </header>
 
-      <nav className="nav-list" aria-label="Kindo utilities">
-        {TOOLS.map((tool) => (
+      <nav className="dir-list" aria-label="Kindo utilities">
+        {TOOLS.map((tool, i) => (
           <RevealItem
             as="button"
             type="button"
-            className="nav-card"
+            className="dir-row"
             key={tool.id}
             onClick={() => onPick(tool.id)}
           >
-            <div className="nav-card-text">
-              <span className="nav-card-kicker">KINDO · {tool.title.toUpperCase()}</span>
-              <span className="nav-card-title">{tool.title}</span>
-              <span className="nav-card-desc">{tool.description}</span>
-            </div>
-            <span className="nav-card-arrow" aria-hidden="true">
+            <span className="dir-index" aria-hidden="true">
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span className="dir-body">
+              <span className="dir-title">{tool.title}</span>
+              <span className="dir-desc">{tool.description}</span>
+            </span>
+            <span className="dir-arrow" aria-hidden="true">
               &rarr;
             </span>
           </RevealItem>

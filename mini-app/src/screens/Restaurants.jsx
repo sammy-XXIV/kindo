@@ -11,6 +11,23 @@ const RESERVATION_FIELDS = [
   { key: 'partySize', label: 'Party size', placeholder: '2' },
 ]
 
+// Registers the reservation (name, date, time, party) before payment, so the
+// backend has what a real Resy booking would need once the NIM lands.
+async function registerRestaurantOrder({ orderId, item, extraValues }) {
+  const res = await fetch('/api/orders/restaurant', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orderId,
+      priceNim: item.priceNim,
+      venueId: item.id,
+      venue: item.title,
+      reservation: extraValues,
+    }),
+  })
+  if (!res.ok) throw new Error('Could not register reservation')
+}
+
 function Restaurants({ onBack }) {
   return (
     <PurchaseFlow
@@ -23,6 +40,7 @@ function Restaurants({ onBack }) {
       extraFields={RESERVATION_FIELDS}
       receiptBrandSub="TABLE"
       stampText="CONFIRMED"
+      beforePay={registerRestaurantOrder}
     />
   )
 }

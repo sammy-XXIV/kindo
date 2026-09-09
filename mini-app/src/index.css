@@ -1,15 +1,31 @@
 :root {
-  --ink: #1f2348;
-  --ink-deep: #12142e;
+  /* Casing — a warm near-black terminal, not cold navy. */
+  --ink: #17181f;
+  --ink-deep: #101015;
+  --panel: #1f2029; /* flat card surface — replaces frosted glass */
+  --panel-active: #292b36;
+  --line: #34363f; /* 2px borders on the casing */
+
+  /* Digital side: Nimiq gold. */
   --gold: #e9b213;
   --gold-bright: #f4c430;
-  --paper: #f7f2e4;
-  --paper-line: #c9bfa0;
-  --mist: #9ea2c4;
-  --white: #ffffff;
+
+  /* Physical side: rubber-stamp ink — the "confirmed / real" mark. */
+  --stamp: #d1402f;
+
+  /* Receipt paper. */
+  --paper: #f2ead6;
+  --paper-ink: #191a20;
+  --paper-line: #c2b79a;
+
+  /* Text on the casing — warm bone, paired with the paper (was white/lavender). */
+  --white: #f3eee2;
+  --mist: #9a968a;
 
   --display: 'Space Grotesk', system-ui, sans-serif;
+  --serif: 'Fraunces', 'Times New Roman', Georgia, serif; /* luxe display titles */
   --mono: 'Space Mono', ui-monospace, Consolas, monospace;
+  --logo: 'Orbitron', 'Space Grotesk', sans-serif;
 
   font: 18px/145% var(--display);
   color-scheme: dark;

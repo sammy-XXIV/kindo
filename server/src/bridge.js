@@ -4,7 +4,7 @@ const { Connection, PublicKey } = require('@solana/web3.js')
 const { getAssociatedTokenAddress, getAccount } = require('@solana/spl-token')
 const { getCurrentBlockNumber, broadcastTransaction } = require('./nimiqRpc')
 const { buildSignedTransfer, MAIN_ALBATROSS } = require('./nimiqWallet')
-const mexc = require('./mexcClient')
+const simpleswap = require('./simpleswapClient')
 const { createInvoice, payInvoice } = require('./bitrefillClient')
 const { buyProduct } = require('./purchClient')
 const orderStore = require('./orderStore')
@@ -13,15 +13,11 @@ const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const USDC_SOLANA = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 const NIM_LUNA = 100000
 
-// Ordered so `stepIndex('sent_to_mexc') < stepIndex('nim_credited')` etc. —
+// Ordered so `stepIndex('nim_forwarded') < stepIndex('usdc_landed')` etc. —
 // lets a retried/resumed run skip whatever already completed.
 const STEPS = [
-  'sending_to_mexc',
-  'sent_to_mexc',
-  'nim_credited',
-  'sold_to_usdt',
-  'bought_usdc',
-  'withdrawn',
+  'swap_created',
+  'nim_forwarded',
   'usdc_landed',
   'fulfilling',
   'done',
@@ -61,11 +57,6 @@ async function pollUntil(checkFn, { intervalMs = 10000, timeoutMs = 20 * 60 * 10
   throw new Error(`Timed out waiting for: ${description}${lastErr ? ` (last error: ${lastErr.message})` : ''}`)
 }
 
-function floorTo(value, decimals) {
-  const factor = 10 ** decimals
-  return Math.floor(value * factor) / factor
-}
-
 async function getBaseUsdcBalance(address) {
   const raw = await baseClient.readContract({
     address: USDC_BASE,
@@ -95,11 +86,12 @@ async function getSolanaUsdcBalance(address) {
   }
 }
 
-// Per order-type config: which chain MEXC should withdraw USDC to, and how
-// to spend it once it lands there.
+// Per order-type config: which chain SimpleSwap should deliver USDC to (as its
+// ticker + a label for logs), and how to spend it once it lands there.
 const FULFILLMENT = {
   'mobile-data': {
-    network: 'BASE',
+    usdcTicker: simpleswap.USDC.BASE,
+    label: 'Base',
     address: () => process.env.EVM_ADDRESS,
     getBalance: () => getBaseUsdcBalance(process.env.EVM_ADDRESS),
     fulfill: async (order) => {
@@ -119,7 +111,8 @@ const FULFILLMENT = {
     },
   },
   shop: {
-    network: 'SOLANA',
+    usdcTicker: simpleswap.USDC.SOLANA,
+    label: 'Solana',
     address: () => process.env.SOLANA_ADDRESS,
     getBalance: () => getSolanaUsdcBalance(process.env.SOLANA_ADDRESS),
     fulfill: async (order) => {
@@ -136,13 +129,41 @@ const FULFILLMENT = {
       log(order.orderId, `Purch order ${result.orderId} placed — total $${result.totalPrice?.amount}`)
     },
   },
+  flights: {
+    usdcTicker: simpleswap.USDC.SOLANA,
+    label: 'Solana',
+    address: () => process.env.SOLANA_ADDRESS,
+    getBalance: () => getSolanaUsdcBalance(process.env.SOLANA_ADDRESS),
+    fulfill: async () => {
+      // BRIJ exposes flight *search* only (no booking endpoint yet), so a real
+      // ticket can't be issued here. Fully demoable via DEMO_MODE.
+      throw new Error('Flight booking unavailable — BRIJ is search-only')
+    },
+  },
+  restaurant: {
+    usdcTicker: simpleswap.USDC.BASE,
+    label: 'Base',
+    address: () => process.env.EVM_ADDRESS,
+    getBalance: () => getBaseUsdcBalance(process.env.EVM_ADDRESS),
+    fulfill: async () => {
+      // AgentRes exposes venue *search* only (no reservation endpoint yet).
+      // Fully demoable via DEMO_MODE.
+      throw new Error('Reservation unavailable — AgentRes is search-only')
+    },
+  },
 }
 
-// Runs the full NIM -> MEXC -> USDC -> (Bitrefill | Purch) pipeline for one
-// paid order. Every step updates the order's persisted state, so progress
-// survives a server restart, is visible to the status endpoint, and a
-// re-invocation (after a transient failure) resumes from bridgeStep instead
-// of redoing steps that already spent real money.
+// Runs one paid order through to fulfillment. USDC is sourced one of two ways,
+// chosen by order size:
+//   swap  — the order clears SimpleSwap's ~$22 minimum, so we forward its NIM
+//           to a SimpleSwap deposit address and it delivers USDC to our wallet
+//           on the fulfillment chain (custodial instant-swap; no HTLC/gas/bridge).
+//   float — the order is too small to swap (airtime, small top-ups): we fulfill
+//           it from a standing USDC float and let the NIM accrue in the receive
+//           wallet toward a later batch swap that refills the float. This is
+//           what makes sub-$22 purchases possible at all.
+// Every step persists, so a server restart or a retry after a transient failure
+// resumes from bridgeStep instead of redoing steps that already moved money.
 async function runBridge(orderId) {
   let order = orderStore.getOrder(orderId)
   if (!order) throw new Error(`Unknown order ${orderId}`)
@@ -150,86 +171,106 @@ async function runBridge(orderId) {
   const config = FULFILLMENT[order.type]
   if (!config) throw new Error(`No fulfillment configured for order type ${order.type}`)
 
+  // DEMO_MODE runs the whole flow shape (bridging -> fulfilled, with logs)
+  // without moving funds or calling paid fulfillment providers, so the app can
+  // be demoed end-to-end on an empty wallet. Flagged (mode/demo:true) so it's
+  // never mistaken for a real order.
+  if (process.env.DEMO_MODE === 'true') {
+    const nimAmount = order.receivedLuna / NIM_LUNA
+    orderStore.updateOrder(orderId, { status: 'bridging', mode: 'demo' })
+    log(orderId, `DEMO: simulating ${nimAmount} NIM -> USDC on ${config.label} (no funds moved)`)
+    orderStore.updateOrder(orderId, { bridgeStep: 'usdc_landed' })
+    orderStore.updateOrder(orderId, { bridgeStep: 'fulfilling' })
+    log(orderId, `DEMO: simulated ${order.type} fulfillment — no real order placed`)
+    orderStore.updateOrder(orderId, { status: 'fulfilled', bridgeStep: 'done', demo: true })
+    return
+  }
+
   const done = (step) => stepIndex(order.bridgeStep) >= stepIndex(step)
 
   try {
-    if (!done('sent_to_mexc')) {
-      orderStore.updateOrder(orderId, { status: 'bridging', bridgeStep: 'sending_to_mexc' })
+    // Decide once how this order sources its USDC, and persist it so a resumed
+    // run stays on the same path: large enough to swap its own NIM, or small
+    // enough that it's fulfilled from the float while its NIM accrues.
+    if (!order.mode) {
       const nimAmount = order.receivedLuna / NIM_LUNA
-      log(orderId, `Sending ${nimAmount} NIM to MEXC deposit address`)
+      const minNim = await simpleswap.getMinNim(config.usdcTicker)
+      const mode = nimAmount >= minNim ? 'swap' : 'float'
+      order = orderStore.updateOrder(orderId, { status: 'bridging', mode })
+      log(orderId, mode === 'swap'
+        ? `Clears the swap minimum (${nimAmount} NIM) — swapping directly on ${config.label}`
+        : `Small order: ${nimAmount} NIM < ${minNim} min — fulfilling from the ${config.label} USDC float; NIM accrues`)
+    }
 
+    if (order.mode === 'swap' && !done('swap_created')) {
+      const nimAmount = order.receivedLuna / NIM_LUNA
+      // Snapshot USDC before the swap so we can detect the exact arrival even
+      // if the wallet already held some USDC.
+      const usdcBefore = await config.getBalance()
+      const exchange = await simpleswap.createExchange({
+        toTicker: config.usdcTicker,
+        amountNim: nimAmount,
+        addressTo: config.address(),
+        refundAddress: process.env.NIMIQ_ADDRESS,
+      })
+      order = orderStore.updateOrder(orderId, {
+        bridgeStep: 'swap_created',
+        swapId: exchange.id,
+        depositAddress: exchange.address_from,
+        expectedUsdc: exchange.amount_to,
+        usdcBefore,
+      })
+      log(orderId, `Created SimpleSwap ${exchange.id}: ${nimAmount} NIM -> ~${exchange.amount_to} USDC on ${config.label}`)
+    }
+
+    if (order.mode === 'swap' && !done('nim_forwarded')) {
+      log(orderId, `Forwarding ${order.receivedLuna / NIM_LUNA} NIM to swap deposit ${order.depositAddress}`)
       const validityStartHeight = await getCurrentBlockNumber()
       const rawTx = buildSignedTransfer({
-        recipient: process.env.MEXC_NIM_DEPOSIT_ADDRESS,
+        recipient: order.depositAddress,
         valueLuna: order.receivedLuna,
         validityStartHeight,
         networkId: MAIN_ALBATROSS,
       })
       const depositTxHash = await broadcastTransaction(rawTx)
-      order = orderStore.updateOrder(orderId, { bridgeStep: 'sent_to_mexc', depositTxHash })
-      log(orderId, `Sent, tx hash ${depositTxHash}`)
+      order = orderStore.updateOrder(orderId, { bridgeStep: 'nim_forwarded', depositTxHash })
+      log(orderId, `Forwarded, tx hash ${depositTxHash}`)
     }
 
-    if (!done('nim_credited')) {
+    if (order.mode === 'swap' && !done('usdc_landed')) {
+      // SimpleSwap reports `finished` once it has sent the USDC payout.
       await pollUntil(
         async () => {
-          const history = await mexc.getDepositHistory('NIM')
-          return history.find((d) => d.txId === order.depositTxHash && d.status === 5)
+          const ex = await simpleswap.getExchange(order.swapId)
+          if (['failed', 'refunded', 'expired'].includes(ex.status)) {
+            throw new Error(`SimpleSwap ${order.swapId} ${ex.status}`)
+          }
+          return ex.status === 'finished' ? ex : null
         },
-        { description: `MEXC crediting deposit ${order.depositTxHash}`, intervalMs: 15000, timeoutMs: 30 * 60 * 1000 },
+        { description: `SimpleSwap ${order.swapId} finishing`, intervalMs: 15000, timeoutMs: 30 * 60 * 1000 },
       )
-      order = orderStore.updateOrder(orderId, { bridgeStep: 'nim_credited' })
-      log(orderId, 'MEXC credited the NIM deposit')
-    }
-
-    if (!done('sold_to_usdt')) {
-      const nimBalance = await mexc.getBalance('NIM')
-      const sellQty = floorTo(parseFloat(nimBalance.free), 2)
-      await mexc.marketSell('NIMUSDT', sellQty)
-      order = orderStore.updateOrder(orderId, { bridgeStep: 'sold_to_usdt' })
-      log(orderId, `Sold ${sellQty} NIM for USDT`)
-    }
-
-    if (!done('bought_usdc')) {
-      const usdtBalance = await pollUntil(
-        async () => {
-          const b = await mexc.getBalance('USDT')
-          return parseFloat(b.free) > 0 ? b : null
-        },
-        { description: 'USDT balance after sell', intervalMs: 3000, timeoutMs: 60000 },
-      )
-      const buyQty = floorTo(parseFloat(usdtBalance.free), 5)
-      await mexc.marketBuy('USDCUSDT', buyQty)
-      order = orderStore.updateOrder(orderId, { bridgeStep: 'bought_usdc' })
-      log(orderId, `Spent ${buyQty} USDT buying USDC`)
-    }
-
-    if (!done('withdrawn')) {
-      const usdcBalance = await pollUntil(
-        async () => {
-          const b = await mexc.getBalance('USDC')
-          return parseFloat(b.free) >= 1 ? b : null
-        },
-        { description: 'USDC balance after buy', intervalMs: 3000, timeoutMs: 60000 },
-      )
-      const withdrawAmount = floorTo(parseFloat(usdcBalance.free), 2)
-      const address = config.address()
-      await mexc.withdraw({ coin: 'USDC', network: config.network, address, amount: withdrawAmount })
-      order = orderStore.updateOrder(orderId, { bridgeStep: 'withdrawn', withdrawAmount })
-      log(orderId, `Withdrew ${withdrawAmount} USDC to ${address} on ${config.network}`)
-    }
-
-    if (!done('usdc_landed')) {
-      const balanceBefore = await config.getBalance()
+      // Then confirm the USDC is actually spendable on-chain before fulfilling.
       await pollUntil(
         async () => {
           const balance = await config.getBalance()
-          return balance > balanceBefore ? balance : null
+          return balance > order.usdcBefore ? balance : null
         },
-        { description: `USDC arriving on ${config.network}`, intervalMs: 15000, timeoutMs: 20 * 60 * 1000 },
+        { description: `USDC arriving on ${config.label}`, intervalMs: 15000, timeoutMs: 20 * 60 * 1000 },
       )
       order = orderStore.updateOrder(orderId, { bridgeStep: 'usdc_landed' })
-      log(orderId, `USDC landed on ${config.network} wallet`)
+      log(orderId, `USDC landed on ${config.label} wallet`)
+    }
+
+    if (order.mode === 'float' && !done('usdc_landed')) {
+      // The customer's NIM stays in the receive wallet, accrued toward the next
+      // batch swap that refills the float. Confirm the float actually holds
+      // USDC before committing to fulfill from it.
+      const floatUsdc = await config.getBalance()
+      if (floatUsdc <= 0) {
+        throw new Error(`USDC float on ${config.label} is empty — top it up to fulfill small orders`)
+      }
+      order = orderStore.updateOrder(orderId, { bridgeStep: 'usdc_landed', accruedLuna: order.receivedLuna })
+      log(orderId, `Fulfilling from ${config.label} float ($${floatUsdc.toFixed(2)} on hand); ${order.receivedLuna / NIM_LUNA} NIM accrued`)
     }
 
     orderStore.updateOrder(orderId, { bridgeStep: 'fulfilling' })

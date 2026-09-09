@@ -14,12 +14,14 @@ const app = express()
 app.use(express.json())
 const PORT = process.env.PORT || 3001
 
-// MEXC's own USDC withdrawal minimums, with a buffer for trading
-// spread/slippage across the NIM->USDT->USDC hops: Base is 1 USDC + 0.1
-// fee (cheap network, small orders work); Solana is 20 USDC + 0.18 fee
-// (Purch/BRIJ only accept Solana, so only bigger orders clear it).
-const MIN_FULFILLABLE_USD_BASE = 1.5
-const MIN_FULFILLABLE_USD_SOLANA = 22
+// Order-size floors for what's worth listing. The bridge fulfills small orders
+// from a standing USDC float and only swaps NIM in batches, so these are NOT
+// the SimpleSwap minimum — they're the smallest orders each chain's float is
+// meant to serve. Base carries the airtime/top-up float, so its floor is low;
+// Solana (Purch/Amazon) has no meaningful float, so its orders effectively
+// swap their own NIM and must clear SimpleSwap's ~$22 minimum plus a buffer.
+const MIN_FULFILLABLE_USD_BASE = 1
+const MIN_FULFILLABLE_USD_SOLANA = 24
 const NIM_LUNA = 100000
 
 app.get('/api/shop/search', async (req, res) => {
@@ -32,10 +34,14 @@ app.get('/api/shop/search', async (req, res) => {
     const rate = await getNimUsdRate()
     const products = await searchProducts(query)
     const mapped = products
-      // Real checkout only supports Amazon (via ASIN/productUrl) for now,
-      // and only orders that clear MEXC's Solana withdrawal floor can
-      // actually be fulfilled in real time.
-      .filter((p) => p.source === 'amazon' && p.price >= MIN_FULFILLABLE_USD_SOLANA)
+      // Real checkout only supports Amazon (via ASIN/productUrl) and orders
+      // that clear the SimpleSwap minimum. In DEMO_MODE fulfillment is mocked,
+      // so show the full range of results instead of that fulfillable subset.
+      .filter(
+        (p) =>
+          process.env.DEMO_MODE === 'true' ||
+          (p.source === 'amazon' && p.price >= MIN_FULFILLABLE_USD_SOLANA),
+      )
       .map((p) => ({
         id: p.id,
         title: p.title,
@@ -104,7 +110,7 @@ app.get('/api/utilities/mobile-data/search', async (req, res) => {
       const packages = (detail.packages || []).slice(3, 9) // mid-range denominations
       for (const pkg of packages) {
         const priceUsd = parseFloat(pkg.payment_price) * btcRate
-        if (priceUsd < MIN_FULFILLABLE_USD_BASE) continue // below MEXC's real-time withdrawal floor
+        if (priceUsd < MIN_FULFILLABLE_USD_BASE) continue // below the SimpleSwap minimum
         items.push({
           id: `${product.slug}-${pkg.package_value}`,
           title: `${detail.name} — ${pkg.package_currency} ${pkg.package_value}`,
@@ -172,10 +178,50 @@ app.post('/api/orders/shop', (req, res) => {
   res.json(order)
 })
 
+// Registers a flight order before payment (the passenger details BRIJ would
+// need to issue a ticket). BRIJ is search-only today, so it's demo-fulfilled.
+app.post('/api/orders/flights', (req, res) => {
+  const { orderId, priceNim, offerId, route, passenger } = req.body || {}
+  if (!orderId || !priceNim || !passenger?.givenName || !passenger?.familyName || !passenger?.email) {
+    return res.status(400).json({ error: 'missing_fields' })
+  }
+  const expectedLuna = Math.round(priceNim * NIM_LUNA)
+  const order = orderStore.createOrder(orderId, {
+    type: 'flights',
+    item: { offerId, route },
+    passenger,
+    expectedLuna,
+  })
+  res.json(order)
+})
+
+// Registers a restaurant reservation before payment. AgentRes is search-only
+// today, so it's demo-fulfilled.
+app.post('/api/orders/restaurant', (req, res) => {
+  const { orderId, priceNim, venueId, venue, reservation } = req.body || {}
+  if (!orderId || !priceNim || !reservation?.name || !reservation?.date || !reservation?.time) {
+    return res.status(400).json({ error: 'missing_fields' })
+  }
+  const expectedLuna = Math.round(priceNim * NIM_LUNA)
+  const order = orderStore.createOrder(orderId, {
+    type: 'restaurant',
+    item: { venueId, venue },
+    reservation,
+    expectedLuna,
+  })
+  res.json(order)
+})
+
 app.get('/api/orders/:orderId', (req, res) => {
   const order = orderStore.getOrder(req.params.orderId)
   if (!order) return res.status(404).json({ error: 'not_found' })
   res.json(order)
+})
+
+// Lets the frontend know whether to take the real Nimiq Pay path or the
+// no-funds demo path.
+app.get('/api/config', (req, res) => {
+  res.json({ demoMode: process.env.DEMO_MODE === 'true' })
 })
 
 // Watches Kindo's own Nimiq address for incoming payments and matches them
@@ -198,7 +244,24 @@ function startPaymentWatcher() {
   })
 }
 
-startPaymentWatcher()
+// DEMO_MODE: skip the on-chain watcher and expose an endpoint that simulates
+// the customer's NIM payment landing, so the whole flow can be triggered
+// without a real payment or any funds in the wallet.
+if (process.env.DEMO_MODE === 'true') {
+  app.post('/api/demo/pay/:orderId', (req, res) => {
+    const order = orderStore.getOrder(req.params.orderId)
+    if (!order) return res.status(404).json({ error: 'not_found' })
+    if (order.status !== 'pending_payment') {
+      return res.status(409).json({ error: 'not_pending', status: order.status })
+    }
+    orderStore.updateOrder(order.orderId, { status: 'paid', receivedLuna: order.expectedLuna, paymentTxHash: 'DEMO' })
+    runBridge(order.orderId).catch((err) => console.error(`demo bridge failed for ${order.orderId}:`, err))
+    res.json({ ok: true, orderId: order.orderId })
+  })
+  console.log('DEMO_MODE on — chain watcher disabled; POST /api/demo/pay/:orderId simulates payment')
+} else {
+  startPaymentWatcher()
+}
 
 // Serves the built mini-app so the API and frontend are one Railway service
 // on one origin — the frontend's relative /api/... calls just work, same as

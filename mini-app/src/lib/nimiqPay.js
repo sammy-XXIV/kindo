@@ -47,3 +47,24 @@ export async function payWithNim({ amountNim, orderId }) {
 export function isInsideNimiqPay() {
   return typeof window !== 'undefined' && Boolean(window.nimiqPay)
 }
+
+// Whether the backend is running in DEMO_MODE (no real funds). Cached after
+// the first check so the confirm screen can decide which pay path to take.
+let demoModePromise = null
+export function isDemoMode() {
+  if (!demoModePromise) {
+    demoModePromise = fetch('/api/config')
+      .then((r) => r.json())
+      .then((c) => Boolean(c.demoMode))
+      .catch(() => false)
+  }
+  return demoModePromise
+}
+
+// Demo stand-in for payWithNim: tells the backend to simulate the NIM payment
+// for this order, so the full flow runs without a real Nimiq Pay transaction.
+export async function payDemo(orderId) {
+  const res = await fetch(`/api/demo/pay/${orderId}`, { method: 'POST' })
+  if (!res.ok) throw new Error('demo_pay_failed')
+  return 'DEMO'
+}
