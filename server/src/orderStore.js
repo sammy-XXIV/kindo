@@ -25,7 +25,10 @@ function createOrder(orderId, data) {
 }
 
 function getOrder(orderId) {
-  return readAll()[orderId] || null
+  // hasOwn, not bracket access: an orderId like "__proto__" would otherwise
+  // resolve to Object.prototype and read as a live order.
+  const orders = readAll()
+  return Object.hasOwn(orders, orderId) ? orders[orderId] : null
 }
 
 function updateOrder(orderId, patch) {

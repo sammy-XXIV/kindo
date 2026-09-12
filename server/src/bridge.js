@@ -7,6 +7,7 @@ const { buildSignedTransfer, MAIN_ALBATROSS } = require('./nimiqWallet')
 const simpleswap = require('./simpleswapClient')
 const { createInvoice, payInvoice } = require('./bitrefillClient')
 const { buyProduct } = require('./purchClient')
+const { getNimUsdRate } = require('./nimPrice')
 const orderStore = require('./orderStore')
 
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -86,6 +87,35 @@ async function getSolanaUsdcBalance(address) {
   }
 }
 
+// Prices in an order come from the client and are therefore untrusted: nothing
+// stops someone POSTing an order that claims a $10 top-up costs 0.01 NIM. The
+// backstop is to re-derive what the customer's NIM was actually worth at
+// fulfillment time and never spend more than that, so an under-payment can
+// never buy more than it paid for. The tolerance only absorbs NIM/USD drift
+// between the quote and the payment landing.
+const OVERSPEND_TOLERANCE = 1.05
+
+async function paidUsdFor(order) {
+  const rate = await getNimUsdRate()
+  return (order.receivedLuna / NIM_LUNA) * rate
+}
+
+// Spend budget for this order: what was actually paid, plus drift tolerance.
+async function spendBudgetUsd(order) {
+  return (await paidUsdFor(order)) * OVERSPEND_TOLERANCE
+}
+
+// Refuses a spend that exceeds what the customer paid. The `!(cost <= budget)`
+// form also rejects NaN costs rather than letting them through.
+async function assertWithinPaid(order, costUsd, label) {
+  const budget = await spendBudgetUsd(order)
+  if (!(Number(costUsd) <= budget)) {
+    throw new Error(
+      `Refusing ${label}: cost $${Number(costUsd).toFixed(4)} exceeds paid value $${budget.toFixed(4)}`,
+    )
+  }
+}
+
 // Per order-type config: which chain SimpleSwap should deliver USDC to (as its
 // ticker + a label for logs), and how to spend it once it lands there.
 const FULFILLMENT = {
@@ -96,6 +126,7 @@ const FULFILLMENT = {
     getBalance: () => getBaseUsdcBalance(process.env.EVM_ADDRESS),
     fulfill: async (order) => {
       let invoiceId = order.invoiceId
+      let invoicePriceUsd = order.invoicePriceUsd
       if (!invoiceId) {
         const invoice = await createInvoice({
           productId: order.item.productId,
@@ -103,9 +134,14 @@ const FULFILLMENT = {
           refillInput: order.phoneNumber,
         })
         invoiceId = invoice.invoice_id
-        orderStore.updateOrder(order.orderId, { invoiceId })
-        log(order.orderId, `Created Bitrefill invoice ${invoiceId} for $${invoice.price_usd}`)
+        invoicePriceUsd = Number(invoice.price_usd)
+        orderStore.updateOrder(order.orderId, { invoiceId, invoicePriceUsd })
+        log(order.orderId, `Created Bitrefill invoice ${invoiceId} for $${invoicePriceUsd}`)
       }
+      // Bitrefill's own invoice price is the real cost — verify it against what
+      // the customer actually paid. Also runs on the resume path, so a stored
+      // invoiceId can never skip the check.
+      await assertWithinPaid(order, invoicePriceUsd, 'top-up')
       await payInvoice(invoiceId)
       log(order.orderId, 'Paid invoice — top-up delivered')
     },
@@ -116,9 +152,10 @@ const FULFILLMENT = {
     address: () => process.env.SOLANA_ADDRESS,
     getBalance: () => getSolanaUsdcBalance(process.env.SOLANA_ADDRESS),
     fulfill: async (order) => {
-      // Buy caps at 2x the searched price + $15 — real total (incl.
-      // shipping/tax) is only known once Purch prices this exact request.
-      const maxUsd = order.item.priceUsd * 2 + 15
+      // Purch only prices the real total (incl. shipping/tax) at buy time, so
+      // this cap is the protection. Derive it from the NIM actually received —
+      // never from the client-supplied price, which an attacker controls.
+      const maxUsd = await spendBudgetUsd(order)
       const result = await buyProduct({
         productUrl: order.item.productUrl,
         shippingAddress: order.shippingAddress,

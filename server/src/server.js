@@ -14,6 +14,42 @@ const app = express()
 app.use(express.json())
 const PORT = process.env.PORT || 3001
 
+// Railway terminates TLS at its proxy, so the real client IP arrives in
+// X-Forwarded-For. Without this every request looks like the proxy's single IP
+// and the limiter below would throttle all users as one bucket.
+app.set('trust proxy', 1)
+
+// Each search route makes a PAID x402 provider call, so an unthrottled endpoint
+// is a way for anyone to drain the wallets. Small in-memory limiter — no extra
+// dependency, and this runs as a single instance.
+function rateLimit({ windowMs, max }) {
+  const hits = new Map()
+  return (req, res, next) => {
+    const now = Date.now()
+    if (hits.size > 5000) {
+      for (const [k, v] of hits) if (now > v.resetAt) hits.delete(k)
+    }
+    const key = req.ip || req.socket.remoteAddress || 'unknown'
+    const entry = hits.get(key)
+    if (!entry || now > entry.resetAt) {
+      hits.set(key, { count: 1, resetAt: now + windowMs })
+      return next()
+    }
+    if (entry.count >= max) {
+      res.set('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)))
+      return res.status(429).json({ error: 'rate_limited' })
+    }
+    entry.count += 1
+    return next()
+  }
+}
+
+// Paid provider calls get a tight budget; the rest of the API a looser one.
+app.use('/api/shop/search', rateLimit({ windowMs: 60000, max: 8 }))
+app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
+app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
+app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
+
 // Order-size floors for what's worth listing. The bridge fulfills small orders
 // from a standing USDC float and only swaps NIM in batches, so these are NOT
 // the SimpleSwap minimum — they're the smallest orders each chain's float is
@@ -212,10 +248,20 @@ app.post('/api/orders/restaurant', (req, res) => {
   res.json(order)
 })
 
+// Order IDs are timestamp-based and therefore guessable, so this returns status
+// only — never the shipping address, email, phone, or passenger/reservation
+// details stored on the order.
 app.get('/api/orders/:orderId', (req, res) => {
   const order = orderStore.getOrder(req.params.orderId)
-  if (!order) return res.status(404).json({ error: 'not_found' })
-  res.json(order)
+  if (!order || !order.orderId) return res.status(404).json({ error: 'not_found' })
+  res.json({
+    orderId: order.orderId,
+    type: order.type,
+    status: order.status,
+    bridgeStep: order.bridgeStep || null,
+    demo: Boolean(order.demo),
+    error: order.error || null,
+  })
 })
 
 // Lets the frontend know whether to take the real Nimiq Pay path or the
