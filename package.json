@@ -4,5 +4,9 @@
   "version": "1.0.0",
   "engines": {
     "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "cd mini-app && npm ci && npm run build && cd ../server && npm ci",
+    "start": "node server/src/server.js"
   }
 }
