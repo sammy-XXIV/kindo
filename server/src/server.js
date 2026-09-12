@@ -4,7 +4,7 @@ const express = require('express')
 const { searchProducts } = require('./purchClient')
 const { searchFlights } = require('./brijClient')
 const { searchTopups, getProductDetail } = require('./bitrefillClient')
-const { getNimUsdRate, getBtcUsdRate, usdToNimSync } = require('./nimPrice')
+const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
 const orderStore = require('./orderStore')
@@ -50,13 +50,10 @@ app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
 
-// Order-size floors for what's worth listing. The bridge fulfills small orders
-// from a standing USDC float and only swaps NIM in batches, so these are NOT
-// the SimpleSwap minimum — they're the smallest orders each chain's float is
-// meant to serve. Base carries the airtime/top-up float, so its floor is low;
-// Solana (Purch/Amazon) has no meaningful float, so its orders effectively
-// swap their own NIM and must clear SimpleSwap's ~$22 minimum plus a buffer.
-const MIN_FULFILLABLE_USD_BASE = 1
+// Order-size floor for what's worth listing. Solana (Purch/Amazon) has no
+// meaningful float, so those orders effectively swap their own NIM and must
+// clear SimpleSwap's ~$22 minimum plus a buffer. Base top-ups have no floor:
+// the standing USDC float fulfills them at any size while the NIM accrues.
 const MIN_FULFILLABLE_USD_SOLANA = 24
 const NIM_LUNA = 100000
 
@@ -137,16 +134,17 @@ app.get('/api/utilities/mobile-data/search', async (req, res) => {
   if (!query) return res.json({ topups: [] })
 
   try {
-    const [nimRate, btcRate] = await Promise.all([getNimUsdRate(), getBtcUsdRate()])
+    const nimRate = await getNimUsdRate()
     const products = (await searchTopups(query)).slice(0, 2) // cap paid detail calls per search
 
     const items = []
     for (const product of products) {
       const detail = await getProductDetail(product.slug)
-      const packages = (detail.packages || []).slice(3, 9) // mid-range denominations
+      const packages = (detail.packages || []).slice(0, 12) // include the cheapest denominations
       for (const pkg of packages) {
-        const priceUsd = parseFloat(pkg.payment_price) * btcRate
-        if (priceUsd < MIN_FULFILLABLE_USD_BASE) continue // below the SimpleSwap minimum
+        // payment_price is already USD — it is NOT a BTC amount.
+        const priceUsd = parseFloat(pkg.payment_price)
+        if (!(priceUsd > 0)) continue // skip packages with no usable price
         items.push({
           id: `${product.slug}-${pkg.package_value}`,
           title: `${detail.name} — ${pkg.package_currency} ${pkg.package_value}`,
