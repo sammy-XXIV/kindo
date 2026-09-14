@@ -2,7 +2,7 @@ import { useState } from 'react'
 import RevealItem from '../components/RevealItem'
 import PurchaseFlow from './PurchaseFlow'
 import { convertCurrency, getWeather, translateText } from '../data/mockUtilities'
-import { fetchTopups } from '../data/bitrefillApi'
+import { fetchTopups, fetchTopupPackages } from '../data/bitrefillApi'
 
 const TOOLS = [
   { id: 'weather', title: 'Weather', description: 'Check any city, live.' },
@@ -14,7 +14,7 @@ const TOOLS = [
 // Matches Bitrefill's real requirement: a top-up only needs the recipient
 // phone number.
 const MOBILE_DATA_FIELDS = [
-  { key: 'phoneNumber', label: 'Phone number', placeholder: '+234 801 234 5678', type: 'tel' },
+  { key: 'phoneNumber', label: 'Phone number (with country code)', placeholder: '+2348012345678', type: 'tel' },
 ]
 
 function Menu({ onPick, onBack }) {
@@ -229,9 +229,15 @@ function Utilities({ onBack }) {
         packageValue: item.packageValue,
         priceNim: item.priceNim,
         phoneNumber: extraValues.phoneNumber,
+        countryCode: item.countryCode,
       }),
     })
-    if (!res.ok) throw new Error('Could not register order')
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      const err = new Error(body.message || 'Could not register order')
+      err.showToUser = Boolean(body.message)
+      throw err
+    }
   }
 
   if (step === 'mobile-data') {
@@ -239,9 +245,10 @@ function Utilities({ onBack }) {
       <PurchaseFlow
         onBack={() => setStep('menu')}
         fetchItems={fetchTopups}
+        expandItem={fetchTopupPackages}
         kicker="Kindo · Mobile Data"
         heading="Whose phone are we topping up?"
-        searchPlaceholder="e.g. MTN Nigeria"
+        searchPlaceholder="MTN, Airtel, Glo, Safaricom…"
         itemLabel="Top-up"
         extraFields={MOBILE_DATA_FIELDS}
         receiptBrandSub="MOBILE DATA"

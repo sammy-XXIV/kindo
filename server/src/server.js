@@ -49,6 +49,7 @@ app.use('/api/shop/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/shop/packages', rateLimit({ windowMs: 60000, max: 12 }))
+app.use('/api/utilities/mobile-data/packages', rateLimit({ windowMs: 60000, max: 12 }))
 app.use('/api/restaurants/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
 
@@ -87,8 +88,10 @@ app.get('/api/shop/search', async (req, res) => {
   }
 })
 
-// The purchasable amounts for one gift card brand, cheapest first.
-app.get('/api/shop/packages', async (req, res) => {
+// The purchasable amounts for one Bitrefill product (gift card brand or
+// mobile operator), cheapest first. One paid detail call, made only when the
+// customer opens that product.
+async function bitrefillPackages(req, res, limit) {
   const slug = (req.query.slug || '').toString().trim()
   if (!slug || !/^[a-z0-9-_]+$/i.test(slug)) return res.status(400).json({ error: 'bad_slug' })
 
@@ -99,7 +102,7 @@ app.get('/api/shop/packages', async (req, res) => {
       .map((pkg) => ({ pkg, priceUsd: parseFloat(pkg.payment_price) }))
       .filter(({ priceUsd }) => priceUsd > 0)
       .sort((a, b) => a.priceUsd - b.priceUsd)
-      .slice(0, 8)
+      .slice(0, limit)
       .map(({ pkg, priceUsd }) => ({
         packageValue: pkg.package_value,
         currency: pkg.package_currency,
@@ -108,19 +111,23 @@ app.get('/api/shop/packages', async (req, res) => {
       }))
     res.json({
       name: detail.name,
+      countryCode: detail.country_code || null,
       rating: detail.ratings?.rating_value ?? null,
       reviewCount: detail.ratings?.rating_count ?? null,
       productUrl: detail.url || null,
       // "none" for most store cards; "email" when the card is emailed to a
-      // named recipient — decides whether refill_input is sent at fulfillment.
+      // named recipient; "phone_number" for top-ups.
       recipientType: detail.recipient_type || 'none',
       packages,
     })
   } catch (err) {
-    console.error('shop packages failed:', err)
+    console.error('packages failed:', err)
     res.status(502).json({ error: 'packages_failed', message: err.message })
   }
-})
+}
+
+app.get('/api/shop/packages', (req, res) => bitrefillPackages(req, res, 8))
+app.get('/api/utilities/mobile-data/packages', (req, res) => bitrefillPackages(req, res, 12))
 
 // Real Resy venues via AgentRes ($0 identity call, but it hits Resy). A table
 // costs the $0.01 booking fee; the customer pays that in NIM. Needs the Resy
@@ -191,54 +198,61 @@ app.get('/api/flights/search', async (req, res) => {
   }
 })
 
+// Airtime: list operators ($0.01); a tapped operator's amounts come from
+// /api/utilities/mobile-data/packages, same as Shop.
 app.get('/api/utilities/mobile-data/search', async (req, res) => {
   const query = (req.query.q || '').toString().trim()
-  if (!query) return res.json({ topups: [] })
+  if (!query) return res.json({ operators: [] })
 
   try {
-    const nimRate = await getNimUsdRate()
-    const products = (await searchTopups(query)).slice(0, 2) // cap paid detail calls per search
-    const details = await Promise.all(products.map((p) => getProductDetail(p.slug)))
-
-    const items = []
-    products.forEach((product, i) => {
-      const detail = details[i]
-      const packages = (detail.packages || []).slice(0, 12) // include the cheapest denominations
-      for (const pkg of packages) {
-        // payment_price is already USD — it is NOT a BTC amount.
-        const priceUsd = parseFloat(pkg.payment_price)
-        if (!(priceUsd > 0)) continue // skip packages with no usable price
-        items.push({
-          id: `${product.slug}-${pkg.package_value}`,
-          title: `${detail.name} — ${pkg.package_currency} ${pkg.package_value}`,
-          subtitle: detail.name,
-          priceNim: usdToNimSync(priceUsd, nimRate),
-          priceUsd,
-          thumb: '📱',
-          productId: product.slug,
-          packageValue: pkg.package_value,
-        })
-      }
-    })
-    res.json({ topups: items })
+    const q = query.toLowerCase()
+    const operators = (await searchTopups(query))
+      .filter((p) => p.in_stock !== false)
+      .sort((a, b) => Number(b.name?.toLowerCase().includes(q)) - Number(a.name?.toLowerCase().includes(q)))
+      .slice(0, 12)
+      .map((p) => ({
+        slug: p.slug,
+        name: p.name,
+        countries: p.countries || [],
+        currency: p.currency || null,
+      }))
+    res.json({ operators })
   } catch (err) {
     console.error('mobile data search failed:', err)
     res.status(502).json({ error: 'search_failed', message: err.message })
   }
 })
 
+// Bitrefill wants the recipient in E.164 (+2348012345678). People type
+// "+234 801 234 5678" or the local "0801…", so normalise: strip formatting,
+// and swap a leading trunk 0 for the product's country code when it's known.
+const DIAL_CODES = { NG: '234', GH: '233', KE: '254', ZA: '27', US: '1', GB: '44', IN: '91', EG: '20' }
+
+function normalisePhone(raw, countryCode) {
+  let n = String(raw || '').replace(/[^\d+]/g, '')
+  if (n.startsWith('00')) n = `+${n.slice(2)}`
+  if (!n.startsWith('+')) {
+    const dial = DIAL_CODES[countryCode]
+    if (n.startsWith('0') && dial) n = `+${dial}${n.slice(1)}`
+    else n = `+${n}`
+  }
+  return /^\+[1-9]\d{6,14}$/.test(n) ? n : null
+}
+
 // Registers a mobile-data order before payment, so once the customer's NIM
 // lands on-chain the backend knows exactly what to fulfill.
 app.post('/api/orders/mobile-data', (req, res) => {
-  const { orderId, productId, packageValue, priceNim, phoneNumber } = req.body || {}
+  const { orderId, productId, packageValue, priceNim, phoneNumber, countryCode } = req.body || {}
   if (!orderId || !productId || !packageValue || !priceNim || !phoneNumber) {
     return res.status(400).json({ error: 'missing_fields' })
   }
+  const phone = normalisePhone(phoneNumber, countryCode)
+  if (!phone) return res.status(400).json({ error: 'bad_phone', message: 'Use international format, e.g. +2348012345678' })
   const expectedLuna = Math.round(priceNim * NIM_LUNA)
   const order = orderStore.createOrder(orderId, {
     type: 'mobile-data',
     item: { productId, packageValue },
-    phoneNumber,
+    phoneNumber: phone,
     expectedLuna,
   })
   res.json(order)

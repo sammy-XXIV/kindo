@@ -308,6 +308,19 @@
   color: var(--gold);
 }
 
+/* Crash screen (ErrorBoundary). */
+.crash {
+  padding: 60px 28px;
+}
+
+.crash-detail {
+  margin: 12px 0 28px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--mist);
+  word-break: break-word;
+}
+
 /* Receipt status in the history list. */
 .hist-status--fulfilled {
   color: var(--gold);

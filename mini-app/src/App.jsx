@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { initLenis } from './lib/lenis'
+import ErrorBoundary from './components/ErrorBoundary'
 import Landing from './screens/Landing'
 import Home from './screens/Home'
 import Shop from './screens/Shop'
@@ -33,16 +34,16 @@ function App() {
     saveScreen(screen)
   }, [screen])
 
+  let content
   if (screen === 'landing') {
-    return <Landing onOpen={() => setScreen('home')} />
+    content = <Landing onOpen={() => setScreen('home')} />
+  } else if (screen === 'home') {
+    content = <Home onSelect={setScreen} onBack={() => setScreen('landing')} onHistory={() => setScreen('history')} />
+  } else {
+    const FeatureScreen = FEATURE_SCREENS[screen]
+    content = <FeatureScreen onBack={() => setScreen('home')} />
   }
-
-  if (screen === 'home') {
-    return <Home onSelect={setScreen} onBack={() => setScreen('landing')} onHistory={() => setScreen('history')} />
-  }
-
-  const FeatureScreen = FEATURE_SCREENS[screen]
-  return <FeatureScreen onBack={() => setScreen('home')} />
+  return <ErrorBoundary key={screen}>{content}</ErrorBoundary>
 }
 
 export default App

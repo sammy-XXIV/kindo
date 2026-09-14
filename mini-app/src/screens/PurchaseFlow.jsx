@@ -195,11 +195,13 @@ function ConfirmStep({
     } catch (err) {
       setStatus('error')
       setErrorMessage(
-        err.message === 'NIMIQ_PAY_NOT_DETECTED'
-          ? "Nimiq Pay not detected — open Kindo from inside Nimiq Pay to pay."
-          : err.message === 'PermissionDeniedError'
-            ? 'Payment cancelled.'
-            : 'Payment failed. Try again.',
+        err.showToUser
+          ? err.message
+          : err.message === 'NIMIQ_PAY_NOT_DETECTED'
+            ? "Nimiq Pay not detected — open Kindo from inside Nimiq Pay to pay."
+            : err.message === 'PermissionDeniedError'
+              ? 'Payment cancelled.'
+              : 'Payment failed. Try again.',
       )
     }
   }
