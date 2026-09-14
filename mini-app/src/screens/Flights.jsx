@@ -59,7 +59,7 @@ function Flights({ onBack }) {
       fetchItems={fetchFlights}
       kicker="Kindo · Flights"
       heading="Where are we flying?"
-      searchPlaceholder="e.g. LOS-LHR"
+      searchPlaceholder="Airport codes, e.g. LOS LHR"
       itemLabel="Route"
       extraFields={PASSENGER_FIELDS}
       receiptBrandSub="FLIGHTS"

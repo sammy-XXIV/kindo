@@ -51,7 +51,7 @@ app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8
 app.use('/api/shop/packages', rateLimit({ windowMs: 60000, max: 12 }))
 app.use('/api/utilities/mobile-data/packages', rateLimit({ windowMs: 60000, max: 12 }))
 app.use('/api/restaurants/search', rateLimit({ windowMs: 60000, max: 8 }))
-app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
+app.use('/api', rateLimit({ windowMs: 60000, max: 180 })) // receipts poll /delivery every 3s
 
 const NIM_LUNA = 100000
 
@@ -170,7 +170,8 @@ function defaultDepartDate() {
 
 app.get('/api/flights/search', async (req, res) => {
   const query = (req.query.q || '').toString().trim()
-  const match = query.match(/^([A-Za-z]{3})\s*(?:-|to|→)\s*([A-Za-z]{3})$/i)
+  // LOS-LHR, LOS LHR, LOS to LHR, LOS→LHR, LOSLHR
+  const match = query.match(/^([A-Za-z]{3})\s*(?:-|to|→|>)?\s*([A-Za-z]{3})$/i)
   if (!match) return res.json({ flights: [] })
 
   try {
