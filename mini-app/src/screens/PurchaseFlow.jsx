@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import RevealItem from '../components/RevealItem'
 import { payWithNim, isDemoMode, payDemo } from '../lib/nimiqPay'
+import { recordOrder } from '../lib/history'
 
 // Shared search → confirm → pay → receipt shape used by Shop, Flights,
 // and Restaurants — only copy, mock data, and labels differ per feature.
@@ -344,7 +345,7 @@ function useDelivery(orderId, txHash) {
   return delivery
 }
 
-function SuccessStep({ item, itemLabel, receiptBrandSub, stampText, txHash, orderId, onDone }) {
+export function SuccessStep({ item, itemLabel, receiptBrandSub, stampText, txHash, orderId, onDone }) {
   const delivery = useDelivery(orderId, txHash)
   const done = delivery.status === 'fulfilled'
   const failed = delivery.status === 'failed'
@@ -513,6 +514,16 @@ function PurchaseFlow({
           onPay={(hash, id) => {
             setTxHash(hash)
             setOrderId(id)
+            recordOrder({
+              orderId: id,
+              txHash: hash,
+              title: item.title,
+              subtitle: item.subtitle || '',
+              priceNim: item.priceNim,
+              itemLabel,
+              receiptBrandSub,
+              stampText,
+            })
             setStep('success')
           }}
           onExpandImage={setLightboxImage}

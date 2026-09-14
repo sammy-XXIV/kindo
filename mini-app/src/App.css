@@ -288,6 +288,35 @@
   padding: 18px 0 40px;
 }
 
+/* Quiet link under the deck to the receipts list. */
+.home-link {
+  display: block;
+  margin: -16px auto 40px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mist);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.home-link:hover {
+  color: var(--gold);
+}
+
+/* Receipt status in the history list. */
+.hist-status--fulfilled {
+  color: var(--gold);
+}
+
+.hist-status--failed {
+  color: var(--stamp);
+}
+
 .swipe-dot {
   width: 8px;
   height: 8px;
@@ -698,7 +727,8 @@
 
 /* ---------- Shop: search ---------- */
 
-/* One integrated field: dark panel, gold icon key on the right. */
+/* One integrated field: dark panel, gold icon key on the right. No outline —
+   the panel tone alone marks the field; focus shows on the caret, not a box. */
 .search-bar {
   display: flex;
   align-items: center;
@@ -706,13 +736,7 @@
   margin: 12px 28px 0;
   padding: 5px 5px 5px 16px;
   background: var(--panel);
-  border: 2px solid var(--line);
   border-radius: 12px;
-  transition: border-color 0.15s ease;
-}
-
-.search-bar:focus-within {
-  border-color: var(--gold);
 }
 
 .search-input {

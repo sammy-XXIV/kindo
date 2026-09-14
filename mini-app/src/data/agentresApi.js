@@ -1,11 +1,5 @@
-// Real Resy venue search via the Kindo backend (AgentRes). In DEMO_MODE the
-// backend can't book anyway, so the mock list stands in for the walkthrough.
-import { isDemoMode } from '../lib/nimiqPay'
-import { fetchRestaurants as fetchMockRestaurants } from './mockRestaurants'
-
+// Real Resy venue search via the Kindo backend (AgentRes).
 export async function fetchRestaurants(query) {
-  if (await isDemoMode()) return fetchMockRestaurants(query)
-
   const q = query.trim()
   if (!q) return []
 

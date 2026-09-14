@@ -35,7 +35,7 @@ const COPIES = 3
 const N = NAV_ITEMS.length
 const LOOP = Array.from({ length: COPIES }, () => NAV_ITEMS).flat()
 
-function Home({ onSelect, onBack }) {
+function Home({ onSelect, onBack, onHistory }) {
   const trackRef = useRef(null)
   const setWidthRef = useRef(0)
   const [active, setActive] = useState(0)
@@ -104,7 +104,7 @@ function Home({ onSelect, onBack }) {
       </div>
 
       <header className="home-header">
-        <p className="eyebrow">Members only · pay in NIM</p>
+        <p className="eyebrow">NIM-native · no card, no account</p>
         <h2>Choose your pass.</h2>
       </header>
 
@@ -153,6 +153,10 @@ function Home({ onSelect, onBack }) {
           />
         ))}
       </div>
+
+      <button type="button" className="home-link" onClick={onHistory}>
+        Past receipts &rarr;
+      </button>
     </div>
   )
 }
