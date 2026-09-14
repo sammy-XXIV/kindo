@@ -10,6 +10,7 @@ const brij = require('./brijClient')
 const agentres = require('./agentresClient')
 const { getNimUsdRate } = require('./nimPrice')
 const orderStore = require('./orderStore')
+const { maybeSweep } = require('./sweep')
 
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const USDC_SOLANA = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
@@ -356,6 +357,9 @@ async function runBridge(orderId) {
     orderStore.updateOrder(orderId, { bridgeStep: 'fulfilling' })
     await config.fulfill(order)
     orderStore.updateOrder(orderId, { status: 'fulfilled', bridgeStep: 'done' })
+    // Float-mode orders leave their NIM behind; once enough has accrued to
+    // clear the swap minimum, turn it back into float.
+    if (order.mode === 'float') maybeSweep((m) => console.log(m))
   } catch (err) {
     orderStore.updateOrder(orderId, { status: 'failed', error: err.message })
     log(orderId, `FAILED: ${err.message}`)
