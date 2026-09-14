@@ -1,5 +1,5 @@
 import PurchaseFlow from './PurchaseFlow'
-import { fetchProducts } from '../data/purchApi'
+import { fetchProducts, fetchPackages } from '../data/purchApi'
 
 // Gift cards are delivered as codes, so the only detail we need is where to
 // send the receipt (and the card itself, for brands that email it).
@@ -28,6 +28,7 @@ function Shop({ onBack }) {
     <PurchaseFlow
       onBack={onBack}
       fetchItems={fetchProducts}
+      expandItem={fetchPackages}
       kicker="Kindo · Shop"
       heading="Gift cards, anywhere."
       searchPlaceholder="Amazon, Steam, Spar, Roblox…"

@@ -26,6 +26,8 @@ function SearchStep({
   searchError,
   onSearch,
   onPick,
+  onExpand,
+  expanded,
   onExpandImage,
   onBack,
 }) {
@@ -71,13 +73,16 @@ function SearchStep({
       </form>
 
       <div className={`product-list ${results[0]?.imageUrl ? 'product-list--store' : 'product-list--dir'}`}>
-        {results.map((item) => (
+        {results.map((item) => {
+          const open = item.expandable ? expanded[item.id] : null
+          return (
+          <div className={`product-entry${open ? ' product-entry--open' : ''}`} key={item.id}>
           <RevealItem
             as="button"
             type="button"
-            className={`product-item${item.imageUrl ? ' product-item--image' : ''}`}
-            key={item.id}
-            onClick={() => onPick(item)}
+            className={`product-item${item.imageUrl ? ' product-item--image' : ''}${item.expandable ? ' product-item--brand' : ''}`}
+            onClick={() => (item.expandable ? onExpand(item) : onPick(item))}
+            aria-expanded={item.expandable ? Boolean(open) : undefined}
           >
             {item.imageUrl && (
               <span
@@ -109,19 +114,46 @@ function SearchStep({
                 {item.subtitle && <span className="product-subtitle">{item.subtitle}</span>}
               </span>
             </span>
-            <span className="product-foot">
-              <span className="product-cue">Pay in NIM</span>
-              <span className="product-price">
-                {item.priceNim.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                <span className="product-price-unit">NIM</span>
-                <span className="product-chevron" aria-hidden="true">&rarr;</span>
+            {item.expandable ? (
+              <span className="product-foot">
+                <span className="product-cue">{open?.loading ? 'Loading amounts' : 'Choose an amount'}</span>
+                <span className="product-chevron product-chevron--toggle" aria-hidden="true">
+                  {open?.loading ? <span className="spinner spinner--inline" /> : open ? '−' : '+'}
+                </span>
               </span>
-            </span>
+            ) : (
+              <span className="product-foot">
+                <span className="product-cue">Pay in NIM</span>
+                <span className="product-price">
+                  {item.priceNim.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                  <span className="product-price-unit">NIM</span>
+                  <span className="product-chevron" aria-hidden="true">&rarr;</span>
+                </span>
+              </span>
+            )}
           </RevealItem>
-        ))}
+          {open && !open.loading && (
+            <div className="pkg-strip">
+              {open.error && <p className="search-error">{open.error}</p>}
+              {open.items?.map((sub) => (
+                <button type="button" className="pkg-chip" key={sub.id} onClick={() => onPick(sub)}>
+                  <span className="pkg-chip-value">{sub.title}</span>
+                  <span className="pkg-chip-price">
+                    {Math.round(sub.priceNim).toLocaleString()} <span>NIM</span>
+                  </span>
+                </button>
+              ))}
+              {open.items && open.items.length === 0 && !open.error && (
+                <p className="empty-note">No amounts available right now.</p>
+              )}
+            </div>
+          )}
+          </div>
+          )
+        })}
         {results.length === 0 && searchError && <p className="search-error">{searchError}</p>}
         {results.length === 0 && !searchError && (
           <p className="empty-note">
@@ -390,8 +422,12 @@ function PurchaseFlow({
   receiptBrandSub,
   stampText,
   beforePay,
+  expandItem,
 }) {
   const [step, setStep] = useState('search')
+  // Brand rows (Shop) unfold their amounts on tap; keyed by item id so a
+  // second tap folds it back without refetching.
+  const [expanded, setExpanded] = useState({})
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [hasSearched, setHasSearched] = useState(false)
@@ -403,9 +439,23 @@ function PurchaseFlow({
   const [orderId, setOrderId] = useState(null)
   const [lightboxImage, setLightboxImage] = useState(null)
 
+  function handleExpand(item) {
+    const current = expanded[item.id]
+    if (current?.loading) return
+    if (current?.items) {
+      setExpanded((e) => ({ ...e, [item.id]: null })) // fold
+      return
+    }
+    setExpanded((e) => ({ ...e, [item.id]: { loading: true } }))
+    expandItem(item)
+      .then((items) => setExpanded((e) => ({ ...e, [item.id]: { items } })))
+      .catch(() => setExpanded((e) => ({ ...e, [item.id]: { items: [], error: 'Could not load amounts. Try again.' } })))
+  }
+
   function handleSearch() {
     setIsSearching(true)
     setSearchError('')
+    setExpanded({})
     fetchItems(query)
       .then((items) => {
         setResults(items)
@@ -442,6 +492,8 @@ function PurchaseFlow({
           isSearching={isSearching}
           searchError={searchError}
           onSearch={handleSearch}
+          onExpand={handleExpand}
+          expanded={expanded}
           onPick={(p) => {
             setItem(p)
             setStep('confirm')

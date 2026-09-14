@@ -47,68 +47,76 @@ function rateLimit({ windowMs, max }) {
 app.use('/api/shop/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
+app.use('/api/shop/packages', rateLimit({ windowMs: 60000, max: 12 }))
 app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
 
 const NIM_LUNA = 100000
 
-// Shop = Bitrefill gift cards (Amazon, Steam, Spar Nigeria, …). Same paid
-// search → product-detail → invoice chain as airtime, and fulfilled the same
-// way from the Base USDC float, so a code is deliverable anywhere — unlike
-// physical Amazon goods, which every provider ships to the US only.
+// Shop = Bitrefill gift cards (Amazon, Steam, Spar Nigeria, …), fulfilled the
+// same way as airtime from the Base USDC float, so a code is deliverable
+// anywhere — unlike physical Amazon goods, which every provider ships to the
+// US only. Two paid steps: this search lists brands ($0.02); the amounts for
+// one brand are fetched only when it's tapped (/api/shop/packages, $0.01),
+// rather than paying for detail on every brand up front.
 app.get('/api/shop/search', async (req, res) => {
   const query = (req.query.q || '').toString().trim()
-  if (!query) return res.json({ products: [] })
+  if (!query) return res.json({ brands: [] })
 
   try {
-    // Resolve the NIM/USD rate before spending on the paid search, so a
-    // price-fetch hiccup can't strand a search we already paid for.
-    const rate = await getNimUsdRate()
     const q = query.toLowerCase()
     const brands = (await searchGiftCards(query))
       .filter((b) => b.in_stock !== false)
       // Bitrefill ranks by keyword fuzzily ("spar" surfaces a Thai wallet
       // first); put brands whose name actually contains the query on top.
       .sort((a, b) => Number(b.name?.toLowerCase().includes(q)) - Number(a.name?.toLowerCase().includes(q)))
-      .slice(0, 4) // cap paid detail calls
-
-    // Each detail call is an independent paid x402 request (~6s of Solana
-    // settlement each), so fetch them concurrently rather than one by one.
-    const details = await Promise.all(brands.map((b) => getProductDetail(b.slug)))
-
-    const products = []
-    brands.forEach((brand, i) => {
-      const detail = details[i]
-      const where = (brand.countries || []).slice(0, 3).join(', ')
-      // Cheapest denominations first (Amazon lists $1000 at the top).
-      const packages = [...(detail.packages || [])]
-        .sort((a, b) => parseFloat(a.payment_price) - parseFloat(b.payment_price))
-        .slice(0, 6)
-      for (const pkg of packages) {
-        // payment_price is already USD (payment_currency: "USD").
-        const priceUsd = parseFloat(pkg.payment_price)
-        if (!(priceUsd > 0)) continue
-        products.push({
-          id: `${brand.slug}-${pkg.package_value}`,
-          title: `${pkg.package_currency} ${pkg.package_value}`,
-          subtitle: where ? `${detail.name} · ${where}` : detail.name,
-          thumb: (detail.name || '?').trim().charAt(0).toUpperCase(),
-          priceNim: usdToNimSync(priceUsd, rate),
-          priceUsd,
-          rating: detail.ratings?.rating_value ?? null,
-          reviewCount: detail.ratings?.rating_count ?? null,
-          productUrl: detail.url || brand.product_url || null,
-          productId: brand.slug,
-          packageValue: pkg.package_value,
-          // "none" for most store cards; "email" when the card is emailed
-          // to a named recipient — decides whether refill_input is sent.
-          recipientType: detail.recipient_type || 'none',
-        })
-      }
-    })
-    res.json({ products })
+      .slice(0, 12)
+      .map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        countries: b.countries || [],
+        currency: b.currency || null,
+        category: (b.categories || [])[0] || null,
+        productUrl: b.product_url || null,
+      }))
+    res.json({ brands })
   } catch (err) {
     console.error('shop search failed:', err)
     res.status(502).json({ error: 'search_failed', message: err.message })
+  }
+})
+
+// The purchasable amounts for one gift card brand, cheapest first.
+app.get('/api/shop/packages', async (req, res) => {
+  const slug = (req.query.slug || '').toString().trim()
+  if (!slug || !/^[a-z0-9-_]+$/i.test(slug)) return res.status(400).json({ error: 'bad_slug' })
+
+  try {
+    const [rate, detail] = await Promise.all([getNimUsdRate(), getProductDetail(slug)])
+    const packages = [...(detail.packages || [])]
+      // payment_price is already USD (payment_currency: "USD").
+      .map((pkg) => ({ pkg, priceUsd: parseFloat(pkg.payment_price) }))
+      .filter(({ priceUsd }) => priceUsd > 0)
+      .sort((a, b) => a.priceUsd - b.priceUsd)
+      .slice(0, 8)
+      .map(({ pkg, priceUsd }) => ({
+        packageValue: pkg.package_value,
+        currency: pkg.package_currency,
+        priceUsd,
+        priceNim: usdToNimSync(priceUsd, rate),
+      }))
+    res.json({
+      name: detail.name,
+      rating: detail.ratings?.rating_value ?? null,
+      reviewCount: detail.ratings?.rating_count ?? null,
+      productUrl: detail.url || null,
+      // "none" for most store cards; "email" when the card is emailed to a
+      // named recipient — decides whether refill_input is sent at fulfillment.
+      recipientType: detail.recipient_type || 'none',
+      packages,
+    })
+  } catch (err) {
+    console.error('shop packages failed:', err)
+    res.status(502).json({ error: 'packages_failed', message: err.message })
   }
 })
 
