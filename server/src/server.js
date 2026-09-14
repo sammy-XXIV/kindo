@@ -2,6 +2,7 @@ require('dotenv').config()
 const path = require('path')
 const express = require('express')
 const { searchFlights } = require('./brijClient')
+const { searchRestaurants } = require('./agentresClient')
 const { searchTopups, searchGiftCards, getProductDetail } = require('./bitrefillClient')
 const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments } = require('./nimiqRpc')
@@ -48,6 +49,7 @@ app.use('/api/shop/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/shop/packages', rateLimit({ windowMs: 60000, max: 12 }))
+app.use('/api/restaurants/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
 
 const NIM_LUNA = 100000
@@ -117,6 +119,39 @@ app.get('/api/shop/packages', async (req, res) => {
   } catch (err) {
     console.error('shop packages failed:', err)
     res.status(502).json({ error: 'packages_failed', message: err.message })
+  }
+})
+
+// Real Resy venues via AgentRes ($0 identity call, but it hits Resy). A table
+// costs the $0.01 booking fee; the customer pays that in NIM. Needs the Resy
+// account linked to the Base wallet (server/_link_resy.js) — until then this
+// reports unavailable rather than showing venues that can't be booked.
+const RESERVATION_FEE_USD = 0.01
+
+app.get('/api/restaurants/search', async (req, res) => {
+  const query = (req.query.q || '').toString().trim()
+  if (!query) return res.json({ restaurants: [] })
+  const city = (req.query.city || 'nyc').toString().toLowerCase().replace(/[^a-z-]/g, '')
+
+  try {
+    const [rate, venues] = await Promise.all([getNimUsdRate(), searchRestaurants(query, city)])
+    const restaurants = venues.slice(0, 12).map((v) => ({
+      id: String(v.venue_id),
+      title: v.name,
+      subtitle: [v.neighborhood, (v.cuisine || []).slice(0, 2).join(', ')].filter(Boolean).join(' · '),
+      thumb: (v.name || '?').trim().charAt(0).toUpperCase(),
+      rating: v.rating ?? null,
+      priceUsd: RESERVATION_FEE_USD,
+      priceNim: usdToNimSync(RESERVATION_FEE_USD, rate),
+    }))
+    res.json({ restaurants })
+  } catch (err) {
+    console.error('restaurant search failed:', err)
+    const unavailable = err.code === 'NO_LINKED_ACCOUNT'
+    res.status(502).json({
+      error: unavailable ? 'not_linked' : 'search_failed',
+      message: unavailable ? 'Dining is not set up yet — link a Resy account.' : err.message,
+    })
   }
 })
 
@@ -243,8 +278,8 @@ app.post('/api/orders/flights', (req, res) => {
   res.json(order)
 })
 
-// Registers a restaurant reservation before payment. AgentRes is search-only
-// today, so it's demo-fulfilled.
+// Registers a restaurant reservation before payment; the bridge re-checks
+// availability for that day/party and books the nearest slot on AgentRes.
 app.post('/api/orders/restaurant', (req, res) => {
   const { orderId, priceNim, venueId, venue, reservation } = req.body || {}
   if (!orderId || !priceNim || !reservation?.name || !reservation?.date || !reservation?.time) {

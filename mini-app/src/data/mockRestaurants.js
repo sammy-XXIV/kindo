@@ -1,6 +1,4 @@
-// Mock data standing in for a real AgentRes/Resy search call.
-// Swap fetchRestaurants' body for a real API request once a funded
-// x402-capable wallet exists to pay for search calls.
+// Demo-mode stand-in for the real AgentRes/Resy search (see agentresApi.js).
 const RESTAURANTS = [
   { id: 'nobu', title: 'Nobu', subtitle: 'Omakase · $$$$', priceNim: 0.05, thumb: 'N', rating: 4.9 },
   { id: 'elan', title: 'Élan', subtitle: 'Modern French · $$$$', priceNim: 0.05, thumb: 'E', rating: 4.8 },

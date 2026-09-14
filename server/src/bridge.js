@@ -6,6 +6,8 @@ const { getCurrentBlockNumber, broadcastTransaction } = require('./nimiqRpc')
 const { buildSignedTransfer, MAIN_ALBATROSS } = require('./nimiqWallet')
 const simpleswap = require('./simpleswapClient')
 const { createInvoice, payInvoice } = require('./bitrefillClient')
+const brij = require('./brijClient')
+const agentres = require('./agentresClient')
 const { getNimUsdRate } = require('./nimPrice')
 const orderStore = require('./orderStore')
 
@@ -164,10 +166,29 @@ const FULFILLMENT = {
     label: 'Solana',
     address: () => process.env.SOLANA_ADDRESS,
     getBalance: () => getSolanaUsdcBalance(process.env.SOLANA_ADDRESS),
-    fulfill: async () => {
-      // BRIJ exposes flight *search* only (no booking endpoint yet), so a real
-      // ticket can't be issued here. Fully demoable via DEMO_MODE.
-      throw new Error('Flight booking unavailable — BRIJ is search-only')
+    // BRIJ: lock the offer into an escrow-backed intent ($0.10), then fund
+    // the escrow with the fare and request ticketing. The escrow amount is
+    // BRIJ's real price (fare + fee), so that is what's checked against the
+    // NIM received — and the x402 client is capped to exactly that amount.
+    fulfill: async (order) => {
+      let intent = order.brijIntent
+      if (!intent) {
+        intent = await brij.createIntent(order.item.offerId)
+        orderStore.updateOrder(order.orderId, { brijIntent: intent })
+        log(order.orderId, `BRIJ intent ${intent.id}: escrow ${intent.expected_escrow_amount} µUSDC, expires ${intent.expires_at}`)
+      }
+      if (intent.status === 'refunded') throw new Error(`BRIJ intent ${intent.id} was refunded`)
+      const escrowUsd = Number(intent.expected_escrow_amount) / 1e6
+      await assertWithinPaid(order, escrowUsd, 'flight')
+      if (!order.brijOrderId) {
+        const result = await brij.bookIntent(intent, order.passenger)
+        const orderId = result.booking?.order_id
+        orderStore.updateOrder(order.orderId, {
+          brijOrderId: orderId,
+          delivery: { order_id: orderId, support_code: result.intent?.customer_support_code },
+        })
+        log(order.orderId, `Escrow funded ($${escrowUsd}) — BRIJ order ${orderId} queued for ticketing`)
+      }
     },
   },
   restaurant: {
@@ -175,12 +196,41 @@ const FULFILLMENT = {
     label: 'Base',
     address: () => process.env.EVM_ADDRESS,
     getBalance: () => getBaseUsdcBalance(process.env.EVM_ADDRESS),
-    fulfill: async () => {
-      // AgentRes exposes venue *search* only (no reservation endpoint yet).
-      // Fully demoable via DEMO_MODE.
-      throw new Error('Reservation unavailable — AgentRes is search-only')
+    // AgentRes: re-check availability (slot tokens expire), pick the slot
+    // closest to the requested time, book it ($0.01 from the Base float).
+    // Needs the Resy account linked to the Base wallet once (_link_resy.js).
+    fulfill: async (order) => {
+      if (order.resyToken) return
+      const { date: day, time, partySize } = order.reservation
+      const party = Math.max(1, parseInt(partySize, 10) || 2)
+      const avail = await agentres.getAvailability({ venueId: order.item.venueId, partySize: party, day })
+      const slots = avail.slots || []
+      if (!slots.length) throw new Error(`No tables at ${avail.venue_name || order.item.venue} on ${day} for ${party}`)
+      const wanted = toMinutes(time)
+      const slot = slots
+        .map((s) => ({ s, diff: Math.abs(toMinutes(s.time_start) - wanted) }))
+        .sort((a, b) => a.diff - b.diff)[0]
+      if (slot.diff > 90) throw new Error(`Nearest table is ${slot.s.time_start}, more than 90 min from ${time}`)
+      await assertWithinPaid(order, 0.01, 'reservation')
+      const booked = await agentres.bookTable({ venueId: order.item.venueId, configId: slot.s.config_id, partySize: party, day })
+      orderStore.updateOrder(order.orderId, {
+        resyToken: booked.resy_token,
+        delivery: { reservation_id: booked.reservation_id, slot: slot.s.display || slot.s.time_start },
+      })
+      log(order.orderId, `Booked ${avail.venue_name || order.item.venue} ${day} ${slot.s.time_start} for ${party} (Resy ${booked.reservation_id})`)
     },
   },
+}
+
+// "7:30 PM" / "19:30" -> minutes since midnight, for picking the nearest slot.
+function toMinutes(t) {
+  const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/)
+  if (!m) return 0
+  let h = parseInt(m[1], 10)
+  const ap = m[3]?.toUpperCase()
+  if (ap === 'PM' && h < 12) h += 12
+  if (ap === 'AM' && h === 12) h = 0
+  return h * 60 + parseInt(m[2], 10)
 }
 
 // Runs one paid order through to fulfillment. USDC is sourced one of two ways,

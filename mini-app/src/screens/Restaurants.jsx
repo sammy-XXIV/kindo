@@ -1,5 +1,5 @@
 import PurchaseFlow from './PurchaseFlow'
-import { fetchRestaurants } from '../data/mockRestaurants'
+import { fetchRestaurants } from '../data/agentresApi'
 
 // Matches how Resy/OpenTable actually collect a reservation: name on the
 // booking, contact phone, date, time, and party size as separate fields.
@@ -11,8 +11,8 @@ const RESERVATION_FIELDS = [
   { key: 'partySize', label: 'Party size', placeholder: '2' },
 ]
 
-// Registers the reservation (name, date, time, party) before payment, so the
-// backend has what a real Resy booking would need once the NIM lands.
+// Registers the reservation (name, date, time, party) before payment; once
+// the NIM lands the backend books the nearest Resy slot for that day/party.
 async function registerRestaurantOrder({ orderId, item, extraValues }) {
   const res = await fetch('/api/orders/restaurant', {
     method: 'POST',
