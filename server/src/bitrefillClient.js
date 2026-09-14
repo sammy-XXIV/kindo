@@ -2,6 +2,7 @@ const { Keypair } = require('@solana/web3.js')
 const bs58 = require('bs58').default
 const { createX402Client } = require('x402-solana/client')
 const { fetchWithBasePayment } = require('./x402Base')
+const { fetchWithSiwx } = require('./siwx')
 
 const BITREFILL_BASE = 'https://api.bitrefill.com/x402'
 
@@ -104,4 +105,38 @@ async function payInvoice(invoiceId) {
   return res.json()
 }
 
-module.exports = { searchTopups, searchGiftCards, getProductDetail, createInvoice, payInvoice }
+// Redemption codes are bound to the wallet that paid, so reading them means
+// signing in as that wallet (SIWX, free) — the pay response only links here.
+async function getInvoiceStatus(invoiceId) {
+  const url = `${BITREFILL_BASE}/invoice/status?invoice_id=${encodeURIComponent(invoiceId)}`
+  const res = await fetchWithSiwx(url)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Bitrefill invoice status failed (${res.status}): ${text}`)
+  }
+  return res.json()
+}
+
+// Flattens an invoice's redemption info into receipt rows: one code/PIN set
+// per delivered item. Empty for top-ups, which have nothing to redeem.
+function extractCodes(status) {
+  const rows = []
+  for (const o of status?.redemption_info?.orders || []) {
+    const r = o.redemption_info || {}
+    if (r.code) rows.push({ label: 'Code', value: String(r.code) })
+    if (r.pin) rows.push({ label: 'PIN', value: String(r.pin) })
+    if (r.link || r.url) rows.push({ label: 'Redeem at', value: String(r.link || r.url) })
+    if (r.expiration_date) rows.push({ label: 'Expires', value: String(r.expiration_date).slice(0, 10) })
+  }
+  return rows
+}
+
+module.exports = {
+  searchTopups,
+  searchGiftCards,
+  getProductDetail,
+  createInvoice,
+  payInvoice,
+  getInvoiceStatus,
+  extractCodes,
+}

@@ -8,7 +8,7 @@ const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
 const orderStore = require('./orderStore')
-const { runBridge } = require('./bridge')
+const { runBridge, fetchCodes } = require('./bridge')
 
 const app = express()
 app.use(express.json())
@@ -310,39 +310,30 @@ app.post('/api/orders/restaurant', (req, res) => {
   res.json(order)
 })
 
-// Pulls anything code-like out of a provider's settlement response (gift
-// card code, PIN, redemption link) without hard-coding one provider's shape.
-// Capped so a pathological payload can't balloon the reply.
-function pickCodes(value, path = '', out = []) {
-  if (out.length >= 8 || value == null) return out
-  if (Array.isArray(value)) {
-    value.forEach((v, i) => pickCodes(v, path, out))
-  } else if (typeof value === 'object') {
-    for (const [k, v] of Object.entries(value)) pickCodes(v, k, out)
-  } else if (typeof value === 'string' && value && /code|pin|redeem|voucher|link|url/i.test(path)) {
-    if (!/tx|hash|payment|refund/i.test(path)) out.push({ label: path, value })
-  }
-  return out
-}
-
 // Fulfillment details for the wallet that paid. The payment tx hash is the
 // credential: the watcher records it when the NIM lands and only the payer's
 // wallet ever saw it, so a guessable orderId alone reveals nothing — until
 // the payment is seen, this is just the public status.
-app.get('/api/orders/:orderId/delivery', (req, res) => {
-  const order = orderStore.getOrder(req.params.orderId)
+app.get('/api/orders/:orderId/delivery', async (req, res) => {
+  let order = orderStore.getOrder(req.params.orderId)
   if (!order || !order.orderId) return res.status(404).json({ error: 'not_found' })
   const tx = String(req.query.tx || '').toLowerCase()
   if (!order.paymentTxHash) return res.json({ status: order.status, bridgeStep: null, error: null, recipientType: null, codes: [] })
   if (!tx || tx !== String(order.paymentTxHash).toLowerCase()) {
     return res.status(403).json({ error: 'forbidden' })
   }
+  // Fulfilled Bitrefill orders whose codes were never read (or predate the
+  // SIWX read) get them fetched now, once, when the receipt is opened.
+  if (order.status === 'fulfilled' && order.invoiceId && order.type === 'shop' && !order.delivery?.codes) {
+    await fetchCodes(order.orderId, order.invoiceId)
+    order = orderStore.getOrder(order.orderId)
+  }
   res.json({
     status: order.status,
     bridgeStep: order.bridgeStep || null,
     error: order.error || null,
     recipientType: order.item?.recipientType || null,
-    codes: order.status === 'fulfilled' ? pickCodes(order.delivery) : [],
+    codes: order.status === 'fulfilled' ? order.delivery?.codes || [] : [],
   })
 })
 

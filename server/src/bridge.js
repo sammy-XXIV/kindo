@@ -5,7 +5,7 @@ const { getAssociatedTokenAddress, getAccount } = require('@solana/spl-token')
 const { getCurrentBlockNumber, broadcastTransaction } = require('./nimiqRpc')
 const { buildSignedTransfer, MAIN_ALBATROSS } = require('./nimiqWallet')
 const simpleswap = require('./simpleswapClient')
-const { createInvoice, payInvoice } = require('./bitrefillClient')
+const { createInvoice, payInvoice, getInvoiceStatus, extractCodes } = require('./bitrefillClient')
 const brij = require('./brijClient')
 const agentres = require('./agentresClient')
 const { getNimUsdRate } = require('./nimPrice')
@@ -118,6 +118,21 @@ async function assertWithinPaid(order, costUsd, label) {
   }
 }
 
+// Reads an invoice's redemption codes (SIWX) and stores them on the order.
+// Safe to call again later — e.g. from the delivery endpoint — if the first
+// read failed or predates this code.
+async function fetchCodes(orderId, invoiceId) {
+  let codes = []
+  try {
+    codes = extractCodes(await getInvoiceStatus(invoiceId))
+  } catch (err) {
+    console.error(`[bridge ${orderId}] could not read codes for ${invoiceId}: ${err.message}`)
+    return []
+  }
+  orderStore.updateOrder(orderId, { delivery: { codes, checkedAt: Date.now() } })
+  return codes
+}
+
 // Bitrefill fulfillment (airtime and gift cards): create a price-locked
 // invoice, check its real cost against what the customer paid, pay it from
 // the Base USDC float. `refillInputOf` yields the recipient (phone for a
@@ -146,11 +161,12 @@ function bitrefillFulfillment(label, refillInputOf) {
       // the customer actually paid. Also runs on the resume path, so a stored
       // invoiceId can never skip the check.
       await assertWithinPaid(order, invoicePriceUsd, label)
-      const paid = await payInvoice(invoiceId)
-      // Keep Bitrefill's settlement response: for gift cards it is where the
-      // redemption code (or the pointer to it) comes back.
-      orderStore.updateOrder(order.orderId, { delivery: paid })
+      await payInvoice(invoiceId)
       log(order.orderId, `Paid invoice — ${label} delivered`)
+      // The pay response only links to the invoice; the actual gift card
+      // code/PIN is read back by signing in as the paying wallet.
+      const codes = await fetchCodes(order.orderId, invoiceId)
+      if (codes.length) log(order.orderId, `${codes.length} redemption field(s) stored on the order`)
     },
   }
 }
@@ -367,4 +383,4 @@ async function runBridge(orderId) {
   }
 }
 
-module.exports = { runBridge, getBaseUsdcBalance, getSolanaUsdcBalance }
+module.exports = { runBridge, fetchCodes, getBaseUsdcBalance, getSolanaUsdcBalance }
