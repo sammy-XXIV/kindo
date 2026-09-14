@@ -513,6 +513,56 @@
   text-align: center;
 }
 
+/* Receipt while fulfillment is still running: stamp stays faint until the
+   provider confirms, then the real stamp lands. */
+.stub-stamp--pending {
+  border-style: dashed;
+  opacity: 0.45;
+}
+
+.stub-row--status span:last-child {
+  display: inline-flex;
+  align-items: center;
+  text-align: right;
+}
+
+.stub-row--failed span:last-child {
+  color: var(--stamp);
+}
+
+.spinner--inline {
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+/* A redeemable code on the receipt — the product itself for gift cards. */
+.stub-code {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0 6px;
+  border-bottom: 1px dashed var(--paper-line);
+}
+
+.stub-code-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.stub-code code,
+.stub-code a {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  word-break: break-all;
+  user-select: all;
+  color: inherit;
+}
+
 .scroll-hint {
   display: flex;
   justify-content: center;
@@ -993,7 +1043,25 @@
   padding: 8px 4px;
 }
 
+.search-error {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border: 2px solid var(--stamp);
+  background: var(--white);
+  color: var(--stamp);
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+}
+
 /* ---------- Shop: confirm ---------- */
+
+/* Brand / carrier under the denomination, so "NGN 500" reads as "Spar Nigeria". */
+.confirm-subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--mist);
+}
 
 .confirm-summary {
   margin: 24px 28px 0;

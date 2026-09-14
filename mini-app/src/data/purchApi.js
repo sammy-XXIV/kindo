@@ -1,4 +1,4 @@
-// Real Purch (x402, paid per search) product search via the Kindo backend.
+// Real Bitrefill gift-card search (x402, paid per search) via the Kindo backend.
 export async function fetchProducts(query) {
   const q = query.trim()
   if (!q) return []

@@ -5,7 +5,7 @@ const NAV_ITEMS = [
     id: 'shop',
     kicker: 'KINDO · SHOP',
     title: 'Shop',
-    description: 'Anything, anywhere — settled in NIM.',
+    description: 'Amazon, Steam, Spar — gift cards, settled in NIM.',
   },
   {
     id: 'flights',

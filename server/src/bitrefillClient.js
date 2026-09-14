@@ -36,6 +36,21 @@ async function searchTopups(query) {
   return data.products || []
 }
 
+// Pays Bitrefill (x402, USDC on Solana) and returns matching gift card /
+// voucher brands — Amazon, Steam, Spar Nigeria, etc. Same catalog shape as
+// topups, so the same product-detail + invoice flow fulfills them.
+async function searchGiftCards(query) {
+  const client = getClient()
+  const url = `${BITREFILL_BASE}/gift-cards/search?q=${encodeURIComponent(query)}`
+  const res = await client.fetch(url)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Bitrefill gift card search failed (${res.status}): ${text}`)
+  }
+  const data = await res.json()
+  return data.products || []
+}
+
 // Pays Bitrefill for a product's real denominations, pricing, and recipient requirements.
 async function getProductDetail(slug) {
   const client = getClient()
@@ -57,7 +72,13 @@ async function createInvoice({ productId, packageValue, refillInput }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      items: [{ product_id: productId, package_value: packageValue, refill_input: refillInput }],
+      items: [
+        {
+          product_id: productId,
+          package_value: packageValue,
+          ...(refillInput ? { refill_input: refillInput } : {}),
+        },
+      ],
     }),
   })
   if (!res.ok) {
@@ -67,8 +88,8 @@ async function createInvoice({ productId, packageValue, refillInput }) {
   return res.json()
 }
 
-// Pays the REAL face value of the invoice via x402 on Base, using the USDC
-// bridged in from MEXC. This is the step that actually delivers the top-up.
+// Pays the REAL face value of the invoice via x402 on Base from the USDC
+// float. This is the step that actually delivers the top-up / gift card.
 async function payInvoice(invoiceId) {
   const url = `${BITREFILL_BASE}/invoice/pay`
   const res = await fetchWithBasePayment(url, {
@@ -83,4 +104,4 @@ async function payInvoice(invoiceId) {
   return res.json()
 }
 
-module.exports = { searchTopups, getProductDetail, createInvoice, payInvoice }
+module.exports = { searchTopups, searchGiftCards, getProductDetail, createInvoice, payInvoice }

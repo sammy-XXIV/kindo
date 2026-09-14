@@ -1,16 +1,10 @@
 import PurchaseFlow from './PurchaseFlow'
 import { fetchProducts } from '../data/purchApi'
 
-const SHIPPING_FIELDS = [
-  { key: 'fullName', label: 'Full name', placeholder: 'Jane Doe' },
-  { key: 'addressLine1', label: 'Address', placeholder: 'Street address' },
-  { key: 'addressLine2', label: 'Apt, suite, etc.', placeholder: 'Apt 4B', optional: true },
-  { key: 'city', label: 'City', placeholder: 'Lagos' },
-  { key: 'state', label: 'State / Province', placeholder: 'Lagos State' },
-  { key: 'zip', label: 'ZIP / Postal code', placeholder: '100001' },
-  { key: 'country', label: 'Country code', placeholder: 'US, NG, GB…' },
+// Gift cards are delivered as codes, so the only detail we need is where to
+// send the receipt (and the card itself, for brands that email it).
+const RECIPIENT_FIELDS = [
   { key: 'email', label: 'Email', placeholder: 'jane@example.com', type: 'email' },
-  { key: 'phone', label: 'Phone number', placeholder: '+234 801 234 5678', type: 'tel' },
 ]
 
 async function registerShopOrder({ orderId, item, extraValues }) {
@@ -19,20 +13,11 @@ async function registerShopOrder({ orderId, item, extraValues }) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       orderId,
-      productUrl: item.productUrl,
+      productId: item.productId,
+      packageValue: item.packageValue,
+      recipientType: item.recipientType,
       priceNim: item.priceNim,
-      priceUsd: item.priceUsd,
       email: extraValues.email,
-      shippingAddress: {
-        name: extraValues.fullName,
-        line1: extraValues.addressLine1,
-        line2: extraValues.addressLine2,
-        city: extraValues.city,
-        state: extraValues.state,
-        zip: extraValues.zip,
-        country: extraValues.country,
-        phone: extraValues.phone,
-      },
     }),
   })
   if (!res.ok) throw new Error('Could not register order')
@@ -44,12 +29,12 @@ function Shop({ onBack }) {
       onBack={onBack}
       fetchItems={fetchProducts}
       kicker="Kindo · Shop"
-      heading="What are we buying?"
-      searchPlaceholder="Search for anything, or paste a link"
-      itemLabel="Item"
-      extraFields={SHIPPING_FIELDS}
+      heading="Gift cards, anywhere."
+      searchPlaceholder="Amazon, Steam, Spar, Roblox…"
+      itemLabel="Card"
+      extraFields={RECIPIENT_FIELDS}
       receiptBrandSub="SHOP"
-      stampText="ORDER PLACED"
+      stampText="CARD ISSUED"
       beforePay={registerShopOrder}
     />
   )

@@ -1,9 +1,8 @@
 require('dotenv').config()
 const path = require('path')
 const express = require('express')
-const { searchProducts } = require('./purchClient')
 const { searchFlights } = require('./brijClient')
-const { searchTopups, getProductDetail } = require('./bitrefillClient')
+const { searchTopups, searchGiftCards, getProductDetail } = require('./bitrefillClient')
 const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
@@ -50,43 +49,63 @@ app.use('/api/flights/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api/utilities/mobile-data/search', rateLimit({ windowMs: 60000, max: 8 }))
 app.use('/api', rateLimit({ windowMs: 60000, max: 60 }))
 
-// Order-size floor for what's worth listing. Solana (Purch/Amazon) has no
-// meaningful float, so those orders effectively swap their own NIM and must
-// clear SimpleSwap's ~$22 minimum plus a buffer. Base top-ups have no floor:
-// the standing USDC float fulfills them at any size while the NIM accrues.
-const MIN_FULFILLABLE_USD_SOLANA = 24
 const NIM_LUNA = 100000
 
+// Shop = Bitrefill gift cards (Amazon, Steam, Spar Nigeria, …). Same paid
+// search → product-detail → invoice chain as airtime, and fulfilled the same
+// way from the Base USDC float, so a code is deliverable anywhere — unlike
+// physical Amazon goods, which every provider ships to the US only.
 app.get('/api/shop/search', async (req, res) => {
   const query = (req.query.q || '').toString().trim()
   if (!query) return res.json({ products: [] })
 
   try {
-    // Resolve the NIM/USD rate before spending on the paid Purch search,
-    // so a price-fetch hiccup can't strand a search we already paid for.
+    // Resolve the NIM/USD rate before spending on the paid search, so a
+    // price-fetch hiccup can't strand a search we already paid for.
     const rate = await getNimUsdRate()
-    const products = await searchProducts(query)
-    const mapped = products
-      // Real checkout only supports Amazon (via ASIN/productUrl) and orders
-      // that clear the SimpleSwap minimum. In DEMO_MODE fulfillment is mocked,
-      // so show the full range of results instead of that fulfillable subset.
-      .filter(
-        (p) =>
-          process.env.DEMO_MODE === 'true' ||
-          (p.source === 'amazon' && p.price >= MIN_FULFILLABLE_USD_SOLANA),
-      )
-      .map((p) => ({
-        id: p.id,
-        title: p.title,
-        priceNim: usdToNimSync(p.price, rate),
-        priceUsd: p.price,
-        imageUrl: p.imageUrl || null,
-        subtitle: p.vendor || p.source,
-        productUrl: p.productUrl,
-        rating: p.rating ?? null,
-        reviewCount: p.reviewCount ?? null,
-      }))
-    res.json({ products: mapped })
+    const q = query.toLowerCase()
+    const brands = (await searchGiftCards(query))
+      .filter((b) => b.in_stock !== false)
+      // Bitrefill ranks by keyword fuzzily ("spar" surfaces a Thai wallet
+      // first); put brands whose name actually contains the query on top.
+      .sort((a, b) => Number(b.name?.toLowerCase().includes(q)) - Number(a.name?.toLowerCase().includes(q)))
+      .slice(0, 4) // cap paid detail calls
+
+    // Each detail call is an independent paid x402 request (~6s of Solana
+    // settlement each), so fetch them concurrently rather than one by one.
+    const details = await Promise.all(brands.map((b) => getProductDetail(b.slug)))
+
+    const products = []
+    brands.forEach((brand, i) => {
+      const detail = details[i]
+      const where = (brand.countries || []).slice(0, 3).join(', ')
+      // Cheapest denominations first (Amazon lists $1000 at the top).
+      const packages = [...(detail.packages || [])]
+        .sort((a, b) => parseFloat(a.payment_price) - parseFloat(b.payment_price))
+        .slice(0, 6)
+      for (const pkg of packages) {
+        // payment_price is already USD (payment_currency: "USD").
+        const priceUsd = parseFloat(pkg.payment_price)
+        if (!(priceUsd > 0)) continue
+        products.push({
+          id: `${brand.slug}-${pkg.package_value}`,
+          title: `${pkg.package_currency} ${pkg.package_value}`,
+          subtitle: where ? `${detail.name} · ${where}` : detail.name,
+          thumb: (detail.name || '?').trim().charAt(0).toUpperCase(),
+          priceNim: usdToNimSync(priceUsd, rate),
+          priceUsd,
+          rating: detail.ratings?.rating_value ?? null,
+          reviewCount: detail.ratings?.rating_count ?? null,
+          productUrl: detail.url || brand.product_url || null,
+          productId: brand.slug,
+          packageValue: pkg.package_value,
+          // "none" for most store cards; "email" when the card is emailed
+          // to a named recipient — decides whether refill_input is sent.
+          recipientType: detail.recipient_type || 'none',
+        })
+      }
+    })
+    res.json({ products })
   } catch (err) {
     console.error('shop search failed:', err)
     res.status(502).json({ error: 'search_failed', message: err.message })
@@ -136,10 +155,11 @@ app.get('/api/utilities/mobile-data/search', async (req, res) => {
   try {
     const nimRate = await getNimUsdRate()
     const products = (await searchTopups(query)).slice(0, 2) // cap paid detail calls per search
+    const details = await Promise.all(products.map((p) => getProductDetail(p.slug)))
 
     const items = []
-    for (const product of products) {
-      const detail = await getProductDetail(product.slug)
+    products.forEach((product, i) => {
+      const detail = details[i]
       const packages = (detail.packages || []).slice(0, 12) // include the cheapest denominations
       for (const pkg of packages) {
         // payment_price is already USD — it is NOT a BTC amount.
@@ -156,7 +176,7 @@ app.get('/api/utilities/mobile-data/search', async (req, res) => {
           packageValue: pkg.package_value,
         })
       }
-    }
+    })
     res.json({ topups: items })
   } catch (err) {
     console.error('mobile data search failed:', err)
@@ -181,31 +201,17 @@ app.post('/api/orders/mobile-data', (req, res) => {
   res.json(order)
 })
 
-// Registers a Shop order before payment — Purch's checkout needs the
-// product, real shipping address, and email once the customer's NIM lands.
+// Registers a Shop (gift card) order before payment — the same shape as a
+// top-up, with an email as the recipient instead of a phone number.
 app.post('/api/orders/shop', (req, res) => {
-  const { orderId, productUrl, priceNim, priceUsd, shippingAddress, email } = req.body || {}
-  if (!orderId || !productUrl || !priceNim || !priceUsd || !shippingAddress || !email) {
+  const { orderId, productId, packageValue, priceNim, email, recipientType } = req.body || {}
+  if (!orderId || !productId || !packageValue || !priceNim || !email) {
     return res.status(400).json({ error: 'missing_fields' })
-  }
-  const required = ['name', 'line1', 'city', 'state', 'zip', 'country', 'phone']
-  if (required.some((f) => !shippingAddress[f])) {
-    return res.status(400).json({ error: 'missing_shipping_fields' })
   }
   const expectedLuna = Math.round(priceNim * NIM_LUNA)
   const order = orderStore.createOrder(orderId, {
     type: 'shop',
-    item: { productUrl, priceUsd },
-    shippingAddress: {
-      name: shippingAddress.name,
-      line1: shippingAddress.line1,
-      line2: shippingAddress.line2 || undefined,
-      city: shippingAddress.city,
-      state: shippingAddress.state,
-      postalCode: shippingAddress.zip,
-      country: shippingAddress.country,
-      phone: shippingAddress.phone,
-    },
+    item: { productId, packageValue, recipientType: recipientType || 'none' },
     email,
     expectedLuna,
   })
@@ -244,6 +250,42 @@ app.post('/api/orders/restaurant', (req, res) => {
     expectedLuna,
   })
   res.json(order)
+})
+
+// Pulls anything code-like out of a provider's settlement response (gift
+// card code, PIN, redemption link) without hard-coding one provider's shape.
+// Capped so a pathological payload can't balloon the reply.
+function pickCodes(value, path = '', out = []) {
+  if (out.length >= 8 || value == null) return out
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => pickCodes(v, path, out))
+  } else if (typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) pickCodes(v, k, out)
+  } else if (typeof value === 'string' && value && /code|pin|redeem|voucher|link|url/i.test(path)) {
+    if (!/tx|hash|payment|refund/i.test(path)) out.push({ label: path, value })
+  }
+  return out
+}
+
+// Fulfillment details for the wallet that paid. The payment tx hash is the
+// credential: the watcher records it when the NIM lands and only the payer's
+// wallet ever saw it, so a guessable orderId alone reveals nothing — until
+// the payment is seen, this is just the public status.
+app.get('/api/orders/:orderId/delivery', (req, res) => {
+  const order = orderStore.getOrder(req.params.orderId)
+  if (!order || !order.orderId) return res.status(404).json({ error: 'not_found' })
+  const tx = String(req.query.tx || '').toLowerCase()
+  if (!order.paymentTxHash) return res.json({ status: order.status, bridgeStep: null })
+  if (!tx || tx !== String(order.paymentTxHash).toLowerCase()) {
+    return res.status(403).json({ error: 'forbidden' })
+  }
+  res.json({
+    status: order.status,
+    bridgeStep: order.bridgeStep || null,
+    error: order.error || null,
+    recipientType: order.item?.recipientType || null,
+    codes: order.status === 'fulfilled' ? pickCodes(order.delivery) : [],
+  })
 })
 
 // Order IDs are timestamp-based and therefore guessable, so this returns status

@@ -23,6 +23,7 @@ function SearchStep({
   results,
   hasSearched,
   isSearching,
+  searchError,
   onSearch,
   onPick,
   onExpandImage,
@@ -121,7 +122,8 @@ function SearchStep({
             </span>
           </RevealItem>
         ))}
-        {results.length === 0 && (
+        {results.length === 0 && searchError && <p className="search-error">{searchError}</p>}
+        {results.length === 0 && !searchError && (
           <p className="empty-note">
             {hasSearched ? 'Nothing matched that search. Try another term.' : 'Search to see results.'}
           </p>
@@ -156,7 +158,7 @@ function ConfirmStep({
       const txHash = (await isDemoMode())
         ? await payDemo(orderId)
         : await payWithNim({ amountNim: item.priceNim, orderId })
-      onPay(txHash)
+      onPay(txHash, orderId)
     } catch (err) {
       setStatus('error')
       setErrorMessage(
@@ -181,6 +183,7 @@ function ConfirmStep({
       <header className="home-header">
         <p className="eyebrow">Confirm</p>
         <h2>{item.title}</h2>
+        {item.subtitle && <p className="confirm-subtitle">{item.subtitle}</p>}
       </header>
 
       <div className="confirm-product">
@@ -277,7 +280,54 @@ function ConfirmStep({
   )
 }
 
-function SuccessStep({ item, itemLabel, receiptBrandSub, stampText, txHash, onDone }) {
+// Polls the order's fulfillment after the NIM is sent, using the payment tx
+// hash as the credential. Gives up after ~3 minutes without going silent.
+function useDelivery(orderId, txHash) {
+  const [delivery, setDelivery] = useState({ status: 'paid', codes: [] })
+  useEffect(() => {
+    if (!orderId || !txHash) return undefined
+    let stopped = false
+    let attempts = 0
+    const tick = async () => {
+      attempts += 1
+      try {
+        const res = await fetch(`/api/orders/${orderId}/delivery?tx=${encodeURIComponent(txHash)}`)
+        if (res.ok) {
+          const d = await res.json()
+          if (stopped) return
+          setDelivery(d)
+          if (d.status === 'fulfilled' || d.status === 'failed') return
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+      if (!stopped && attempts < 60) setTimeout(tick, 3000)
+      else if (!stopped) setDelivery((d) => ({ ...d, timedOut: true }))
+    }
+    tick()
+    return () => {
+      stopped = true
+    }
+  }, [orderId, txHash])
+  return delivery
+}
+
+function SuccessStep({ item, itemLabel, receiptBrandSub, stampText, txHash, orderId, onDone }) {
+  const delivery = useDelivery(orderId, txHash)
+  const done = delivery.status === 'fulfilled'
+  const failed = delivery.status === 'failed'
+  const statusLine = failed
+    ? 'Could not complete — your NIM is safe, contact support.'
+    : done
+      ? delivery.codes.length
+        ? 'Ready to redeem'
+        : delivery.recipientType === 'email'
+          ? 'Delivered to your email'
+          : 'Delivered'
+      : delivery.timedOut
+        ? 'Still processing — check back in a minute'
+        : 'Issuing…'
+
   return (
     <div className="success-body">
       <div className="stub">
@@ -299,9 +349,26 @@ function SuccessStep({ item, itemLabel, receiptBrandSub, stampText, txHash, onDo
             <span className="stub-tx-hash">{txHash.slice(0, 10)}&hellip;</span>
           </div>
         )}
+        <div className={`stub-row stub-row--status${failed ? ' stub-row--failed' : ''}`}>
+          <span>STATUS</span>
+          <span>
+            {!done && !failed && !delivery.timedOut && <span className="spinner spinner--inline" aria-hidden="true" />}
+            {statusLine}
+          </span>
+        </div>
+        {delivery.codes.map((c) => (
+          <div className="stub-code" key={c.label + c.value}>
+            <span className="stub-code-label">{c.label.replace(/_/g, ' ').toUpperCase()}</span>
+            {/^https?:\/\//.test(c.value) ? (
+              <a href={c.value} target="_blank" rel="noreferrer">{c.value}</a>
+            ) : (
+              <code>{c.value}</code>
+            )}
+          </div>
+        ))}
         <div className="stub-perforation" aria-hidden="true" />
-        <div className="stub-stamp">
-          <span>{stampText}</span>
+        <div className={`stub-stamp${done ? '' : ' stub-stamp--pending'}`}>
+          <span>{failed ? 'FAILED' : done ? stampText : 'PAID'}</span>
         </div>
       </div>
 
@@ -329,23 +396,35 @@ function PurchaseFlow({
   const [results, setResults] = useState([])
   const [hasSearched, setHasSearched] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
   const [item, setItem] = useState(null)
   const [extraValues, setExtraValues] = useState({})
   const [txHash, setTxHash] = useState(null)
+  const [orderId, setOrderId] = useState(null)
   const [lightboxImage, setLightboxImage] = useState(null)
 
   function handleSearch() {
     setIsSearching(true)
+    setSearchError('')
     fetchItems(query)
       .then((items) => {
         setResults(items)
         setHasSearched(true)
       })
+      // Without this the rejection is swallowed: the spinner stops, results stay
+      // empty, and the screen reads "Search to see results" as if nothing ran.
+      .catch(() => {
+        setResults([])
+        setHasSearched(true)
+        setSearchError('Search is temporarily unavailable. Try again in a moment.')
+      })
       .finally(() => setIsSearching(false))
   }
 
   useEffect(() => {
-    fetchItems('').then(setResults)
+    fetchItems('')
+      .then(setResults)
+      .catch(() => setResults([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -361,6 +440,7 @@ function PurchaseFlow({
           results={results}
           hasSearched={hasSearched}
           isSearching={isSearching}
+          searchError={searchError}
           onSearch={handleSearch}
           onPick={(p) => {
             setItem(p)
@@ -378,8 +458,9 @@ function PurchaseFlow({
           extraFields={extraFields}
           extraValues={extraValues}
           setExtraValues={setExtraValues}
-          onPay={(hash) => {
+          onPay={(hash, id) => {
             setTxHash(hash)
+            setOrderId(id)
             setStep('success')
           }}
           onExpandImage={setLightboxImage}
@@ -395,6 +476,7 @@ function PurchaseFlow({
           receiptBrandSub={receiptBrandSub}
           stampText={stampText}
           txHash={txHash}
+          orderId={orderId}
           onDone={onBack}
         />
       )}

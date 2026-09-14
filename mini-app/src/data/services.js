@@ -2,14 +2,14 @@ export const SERVICES = [
   {
     id: 'shop',
     title: 'Shop',
-    description: 'Search for anything, or paste a link — Kindo buys it and ships it to you.',
+    description: 'Amazon, Steam, Spar, Roblox — gift cards from 10,000+ brands, issued the moment you pay.',
     card: {
       kicker: 'KINDO · SHOP',
       rows: [
-        ['ITEM', 'Wireless Earbuds'],
-        ['PAID', '18.40 NIM'],
+        ['CARD', 'Amazon.com $10'],
+        ['PAID', '26,347 NIM'],
       ],
-      status: 'SHIPPED',
+      status: 'CARD ISSUED',
     },
   },
   {

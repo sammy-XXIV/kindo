@@ -6,7 +6,6 @@ const { getCurrentBlockNumber, broadcastTransaction } = require('./nimiqRpc')
 const { buildSignedTransfer, MAIN_ALBATROSS } = require('./nimiqWallet')
 const simpleswap = require('./simpleswapClient')
 const { createInvoice, payInvoice } = require('./bitrefillClient')
-const { buyProduct } = require('./purchClient')
 const { getNimUsdRate } = require('./nimPrice')
 const orderStore = require('./orderStore')
 
@@ -116,10 +115,12 @@ async function assertWithinPaid(order, costUsd, label) {
   }
 }
 
-// Per order-type config: which chain SimpleSwap should deliver USDC to (as its
-// ticker + a label for logs), and how to spend it once it lands there.
-const FULFILLMENT = {
-  'mobile-data': {
+// Bitrefill fulfillment (airtime and gift cards): create a price-locked
+// invoice, check its real cost against what the customer paid, pay it from
+// the Base USDC float. `refillInputOf` yields the recipient (phone for a
+// top-up, email for a card that needs one, nothing for a plain code).
+function bitrefillFulfillment(label, refillInputOf) {
+  return {
     usdcTicker: simpleswap.USDC.BASE,
     label: 'Base',
     address: () => process.env.EVM_ADDRESS,
@@ -131,7 +132,7 @@ const FULFILLMENT = {
         const invoice = await createInvoice({
           productId: order.item.productId,
           packageValue: order.item.packageValue,
-          refillInput: order.phoneNumber,
+          refillInput: refillInputOf(order),
         })
         invoiceId = invoice.invoice_id
         invoicePriceUsd = Number(invoice.price_usd)
@@ -141,31 +142,23 @@ const FULFILLMENT = {
       // Bitrefill's own invoice price is the real cost — verify it against what
       // the customer actually paid. Also runs on the resume path, so a stored
       // invoiceId can never skip the check.
-      await assertWithinPaid(order, invoicePriceUsd, 'top-up')
-      await payInvoice(invoiceId)
-      log(order.orderId, 'Paid invoice — top-up delivered')
+      await assertWithinPaid(order, invoicePriceUsd, label)
+      const paid = await payInvoice(invoiceId)
+      // Keep Bitrefill's settlement response: for gift cards it is where the
+      // redemption code (or the pointer to it) comes back.
+      orderStore.updateOrder(order.orderId, { delivery: paid })
+      log(order.orderId, `Paid invoice — ${label} delivered`)
     },
-  },
-  shop: {
-    usdcTicker: simpleswap.USDC.SOLANA,
-    label: 'Solana',
-    address: () => process.env.SOLANA_ADDRESS,
-    getBalance: () => getSolanaUsdcBalance(process.env.SOLANA_ADDRESS),
-    fulfill: async (order) => {
-      // Purch only prices the real total (incl. shipping/tax) at buy time, so
-      // this cap is the protection. Derive it from the NIM actually received —
-      // never from the client-supplied price, which an attacker controls.
-      const maxUsd = await spendBudgetUsd(order)
-      const result = await buyProduct({
-        productUrl: order.item.productUrl,
-        shippingAddress: order.shippingAddress,
-        email: order.email,
-        maxUsd,
-      })
-      orderStore.updateOrder(order.orderId, { purchOrderId: result.orderId })
-      log(order.orderId, `Purch order ${result.orderId} placed — total $${result.totalPrice?.amount}`)
-    },
-  },
+  }
+}
+
+// Per order-type config: which chain SimpleSwap should deliver USDC to (as its
+// ticker + a label for logs), and how to spend it once it lands there.
+const FULFILLMENT = {
+  'mobile-data': bitrefillFulfillment('top-up', (order) => order.phoneNumber),
+  shop: bitrefillFulfillment('gift card', (order) =>
+    order.item.recipientType === 'email' ? order.email : undefined,
+  ),
   flights: {
     usdcTicker: simpleswap.USDC.SOLANA,
     label: 'Solana',
