@@ -332,7 +332,7 @@ app.get('/api/orders/:orderId/delivery', (req, res) => {
   const order = orderStore.getOrder(req.params.orderId)
   if (!order || !order.orderId) return res.status(404).json({ error: 'not_found' })
   const tx = String(req.query.tx || '').toLowerCase()
-  if (!order.paymentTxHash) return res.json({ status: order.status, bridgeStep: null })
+  if (!order.paymentTxHash) return res.json({ status: order.status, bridgeStep: null, error: null, recipientType: null, codes: [] })
   if (!tx || tx !== String(order.paymentTxHash).toLowerCase()) {
     return res.status(403).json({ error: 'forbidden' })
   }

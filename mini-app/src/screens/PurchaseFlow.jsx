@@ -330,7 +330,8 @@ function useDelivery(orderId, txHash) {
         if (res.ok) {
           const d = await res.json()
           if (stopped) return
-          setDelivery(d)
+          // Never trust the shape: a missing codes array must not crash the receipt.
+          setDelivery({ ...d, codes: Array.isArray(d.codes) ? d.codes : [] })
           if (d.status === 'fulfilled' || d.status === 'failed') return
         }
       } catch {
