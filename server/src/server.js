@@ -5,7 +5,7 @@ const { searchFlights } = require('./brijClient')
 const { searchRestaurants } = require('./agentresClient')
 const { searchTopups, searchGiftCards, getProductDetail } = require('./bitrefillClient')
 const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
-const { pollForPayments } = require('./nimiqRpc')
+const { pollForPayments, getRecentTransactions } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
 const orderStore = require('./orderStore')
 const { runBridge, fetchCodes } = require('./bridge')
@@ -359,6 +359,41 @@ app.get('/api/receipts', (req, res) => {
   res.json({ receipts: receipts.list(deviceId) })
 })
 
+// Public usage numbers — real orders only (never demo), straight from the
+// order store, with "people" = distinct on-chain payer addresses. Anyone can
+// check them against the receive address on a block explorer. Orders from
+// before payerAddress was recorded get it backfilled from the chain once.
+let statsCache = { at: 0, value: null }
+
+app.get('/api/stats', async (req, res) => {
+  if (Date.now() - statsCache.at < 60000 && statsCache.value) return res.json(statsCache.value)
+  try {
+    const fulfilled = orderStore.listByStatus('fulfilled').filter((o) => !o.demo && o.paymentTxHash && o.paymentTxHash !== 'DEMO')
+    const missing = fulfilled.filter((o) => !o.payerAddress)
+    if (missing.length) {
+      const byHash = new Map((await getRecentTransactions(process.env.NIMIQ_ADDRESS, 200)).map((t) => [String(t.hash).toLowerCase(), t.from]))
+      for (const o of missing) {
+        const from = byHash.get(String(o.paymentTxHash).toLowerCase())
+        if (from) {
+          o.payerAddress = from
+          orderStore.updateOrder(o.orderId, { payerAddress: from })
+        }
+      }
+    }
+    const value = {
+      orders: fulfilled.length,
+      people: new Set(fulfilled.map((o) => o.payerAddress).filter(Boolean)).size,
+      nim: Math.round(fulfilled.reduce((sum, o) => sum + Number(o.receivedLuna || 0), 0) / NIM_LUNA),
+      since: fulfilled.length ? Math.min(...fulfilled.map((o) => o.createdAt || Date.now())) : null,
+      address: process.env.NIMIQ_ADDRESS,
+    }
+    statsCache = { at: Date.now(), value }
+    res.json(value)
+  } catch (err) {
+    res.status(502).json({ error: 'stats_failed', message: err.message })
+  }
+})
+
 // Fulfillment details for the wallet that paid. The payment tx hash is the
 // credential: the watcher records it when the NIM lands and only the payer's
 // wallet ever saw it, so a guessable orderId alone reveals nothing — until
@@ -421,7 +456,7 @@ function startPaymentWatcher() {
         orderStore.updateOrder(orderId, { status: 'failed', error: 'underpaid' })
         return
       }
-      orderStore.updateOrder(orderId, { status: 'paid', receivedLuna: tx.value, paymentTxHash: tx.hash })
+      orderStore.updateOrder(orderId, { status: 'paid', receivedLuna: tx.value, paymentTxHash: tx.hash, payerAddress: tx.from })
       runBridge(orderId).catch((err) => console.error(`bridge failed for ${orderId}:`, err))
     },
     onError: (err) => console.error('payment watcher error:', err),

@@ -308,6 +308,24 @@
   color: var(--gold);
 }
 
+/* Real usage under the landing CTA. */
+.usage-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+.usage-note {
+  color: var(--gold);
+}
+
 /* The wallet we're running inside, under the deck heading. */
 .wallet-line {
   display: flex;

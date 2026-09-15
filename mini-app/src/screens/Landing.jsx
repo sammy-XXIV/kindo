@@ -1,7 +1,38 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MiniStub from '../components/MiniStub'
 import useScrollProgress from '../hooks/useScrollProgress'
 import { SERVICES } from '../data/services'
+import { hostLocale } from '../lib/nimiqPay'
+
+// Live, real numbers from the order store — fulfilled orders only, people =
+// distinct on-chain payers. Hidden until there's something to show.
+function UsageLine() {
+  const [stats, setStats] = useState(null)
+  useEffect(() => {
+    let stopped = false
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!stopped && d && d.orders > 0) setStats(d)
+      })
+      .catch(() => {})
+    return () => {
+      stopped = true
+    }
+  }, [])
+  if (!stats) return null
+  const n = (v) => v.toLocaleString(hostLocale())
+  return (
+    <p className="usage-line">
+      <span>{n(stats.orders)} {stats.orders === 1 ? 'order' : 'orders'} delivered</span>
+      <span aria-hidden="true">·</span>
+      <span>{n(stats.people)} {stats.people === 1 ? 'person' : 'people'}</span>
+      <span aria-hidden="true">·</span>
+      <span>{n(stats.nim)} NIM</span>
+      <span className="usage-note">all on-chain</span>
+    </p>
+  )
+}
 
 function ServiceIsland({ service, index }) {
   const ref = useRef(null)
@@ -77,6 +108,7 @@ function Landing({ onOpen }) {
           <button type="button" className="cta" onClick={onOpen}>
             Open Kindo
           </button>
+          <UsageLine />
         </div>
 
         <div
