@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { getAccount, getBalanceNim, hostLocale } from '../lib/nimiqPay'
 
 const NAV_ITEMS = [
   {
@@ -35,10 +36,35 @@ const COPIES = 3
 const N = NAV_ITEMS.length
 const LOOP = Array.from({ length: COPIES }, () => NAV_ITEMS).flat()
 
+// Short form of a Nimiq address: "NQ48 VUP6 … RUX7".
+function shortAddress(a) {
+  const parts = String(a).split(' ')
+  return parts.length >= 3 ? `${parts[0]} ${parts[1]} … ${parts[parts.length - 1]}` : a
+}
+
 function Home({ onSelect, onBack, onHistory }) {
   const trackRef = useRef(null)
   const setWidthRef = useRef(0)
   const [active, setActive] = useState(0)
+  const [wallet, setWallet] = useState(null) // { address, nim } once Nimiq Pay answers
+
+  // The wallet we're inside: its address from the SDK, balance from chain.
+  useEffect(() => {
+    let stopped = false
+    getAccount().then(async (address) => {
+      if (!address || stopped) return
+      setWallet({ address, nim: null })
+      try {
+        const nim = await getBalanceNim(address)
+        if (!stopped) setWallet({ address, nim })
+      } catch {
+        /* balance stays unknown; the address alone is still worth showing */
+      }
+    })
+    return () => {
+      stopped = true
+    }
+  }, [])
 
   // Width of one full copy of the deck, measured from the DOM.
   function measure() {
@@ -106,6 +132,16 @@ function Home({ onSelect, onBack, onHistory }) {
       <header className="home-header">
         <p className="eyebrow">NIM-native · no card, no account</p>
         <h2>Choose your pass.</h2>
+        {wallet && (
+          <p className="wallet-line">
+            <span className="wallet-address">{shortAddress(wallet.address)}</span>
+            {wallet.nim != null && (
+              <span className="wallet-balance">
+                {wallet.nim.toLocaleString(hostLocale(), { maximumFractionDigits: 2 })} <span>NIM</span>
+              </span>
+            )}
+          </p>
+        )}
       </header>
 
       <div className="swipe-track" ref={trackRef} onScroll={handleScroll} role="list" aria-label="Kindo services">

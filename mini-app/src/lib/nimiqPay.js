@@ -1,4 +1,4 @@
-import { init } from '@nimiq/mini-app-sdk'
+import { init, getHostLanguage, requestDeviceIdentifier } from '@nimiq/mini-app-sdk'
 
 // Kindo's receiving address — where all NIM payments land before the
 // backend detects them, bridges to USDC, and fulfills the order.
@@ -42,6 +42,49 @@ export async function payWithNim({ amountNim, orderId }) {
   })
 
   return txHash
+}
+
+// The wallet's own account — shown on Home and used to check the balance
+// before asking the user to pay. null outside Nimiq Pay or if declined.
+let accountPromise = null
+export function getAccount() {
+  if (!accountPromise) {
+    accountPromise = getNimiq()
+      .then((nimiq) => nimiq.listAccounts())
+      .then((r) => (Array.isArray(r) && r[0]) || null)
+      .catch(() => {
+        accountPromise = null
+        return null
+      })
+  }
+  return accountPromise
+}
+
+// NIM balance for an address, read through the Kindo backend (Albatross RPC).
+export async function getBalanceNim(address) {
+  const res = await fetch(`/api/nim/balance?address=${encodeURIComponent(address)}`)
+  if (!res.ok) throw new Error('balance_failed')
+  return (await res.json()).nim
+}
+
+// Language chosen in Nimiq Pay (ISO 639-1); falls back to the browser's.
+export function hostLocale() {
+  return getHostLanguage() || (typeof navigator !== 'undefined' ? navigator.language : 'en')
+}
+
+// Pseudonymous per-device id from Nimiq Pay. Lets receipts follow the device
+// across reinstalls. First call shows a consent prompt with the reason; null
+// if declined or not inside Nimiq Pay.
+let deviceIdPromise = null
+export function getDeviceId() {
+  if (!deviceIdPromise) {
+    deviceIdPromise = requestDeviceIdentifier({ reason: 'Keep your receipts and gift card codes on this device' })
+      .catch(() => {
+        deviceIdPromise = null
+        return null
+      })
+  }
+  return deviceIdPromise
 }
 
 export function isInsideNimiqPay() {

@@ -138,4 +138,4 @@ function maybeSweep(log = console.log) {
     .catch((err) => log(`[sweep] failed: ${err.message}`))
 }
 
-module.exports = { sweep, maybeSweep, refreshPending, readAll }
+module.exports = { sweep, maybeSweep, refreshPending, readAll, getNimBalanceLuna }

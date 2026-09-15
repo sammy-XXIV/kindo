@@ -9,6 +9,8 @@ const { pollForPayments } = require('./nimiqRpc')
 const { decodeRecipientData } = require('./paymentWatcher')
 const orderStore = require('./orderStore')
 const { runBridge, fetchCodes } = require('./bridge')
+const { getNimBalanceLuna } = require('./sweep')
+const receipts = require('./receiptStore')
 
 const app = express()
 app.use(express.json())
@@ -308,6 +310,53 @@ app.post('/api/orders/restaurant', (req, res) => {
     expectedLuna,
   })
   res.json(order)
+})
+
+// NIM balance of the customer's own wallet address (Nimiq Pay hands the mini
+// app its address; the balance comes from the same RPC the watcher uses).
+app.get('/api/nim/balance', async (req, res) => {
+  const address = String(req.query.address || '').trim().toUpperCase()
+  if (!/^NQ\d{2}( ?[0-9A-Z]{4}){8}$/.test(address)) return res.status(400).json({ error: 'bad_address' })
+  try {
+    const luna = await getNimBalanceLuna(address)
+    res.json({ address, nim: luna / NIM_LUNA })
+  } catch (err) {
+    res.status(502).json({ error: 'balance_failed', message: err.message })
+  }
+})
+
+// Receipts keyed by Nimiq Pay's per-device identifier, so a customer's
+// history survives clearing the webview or reinstalling the wallet. The id
+// is a 64-hex hash only that device (and this server) ever sees; entries
+// hold nothing but order id, tx hash and display fields — the tx hash is
+// still what gates codes on /delivery.
+const DEVICE_ID = /^[a-f0-9]{64}$/i
+
+app.post('/api/receipts', (req, res) => {
+  const { deviceId, receipt } = req.body || {}
+  if (!DEVICE_ID.test(String(deviceId || '')) || !receipt?.orderId || !receipt?.txHash) {
+    return res.status(400).json({ error: 'missing_fields' })
+  }
+  const order = orderStore.getOrder(receipt.orderId)
+  if (!order || !order.orderId) return res.status(404).json({ error: 'not_found' })
+  receipts.add(deviceId, {
+    orderId: receipt.orderId,
+    txHash: String(receipt.txHash),
+    title: String(receipt.title || '').slice(0, 80),
+    subtitle: String(receipt.subtitle || '').slice(0, 120),
+    priceNim: Number(receipt.priceNim) || 0,
+    itemLabel: String(receipt.itemLabel || '').slice(0, 30),
+    receiptBrandSub: String(receipt.receiptBrandSub || '').slice(0, 30),
+    stampText: String(receipt.stampText || '').slice(0, 30),
+    at: Number(receipt.at) || Date.now(),
+  })
+  res.json({ ok: true })
+})
+
+app.get('/api/receipts', (req, res) => {
+  const deviceId = String(req.query.device || '')
+  if (!DEVICE_ID.test(deviceId)) return res.status(400).json({ error: 'bad_device' })
+  res.json({ receipts: receipts.list(deviceId) })
 })
 
 // Fulfillment details for the wallet that paid. The payment tx hash is the

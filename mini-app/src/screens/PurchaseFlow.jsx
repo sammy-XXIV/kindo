@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import RevealItem from '../components/RevealItem'
-import { payWithNim, isDemoMode, payDemo } from '../lib/nimiqPay'
+import { payWithNim, isDemoMode, payDemo, getAccount, getBalanceNim, hostLocale } from '../lib/nimiqPay'
 import { recordOrder } from '../lib/history'
 
 // Shared search → confirm → pay → receipt shape used by Shop, Flights,
@@ -179,8 +179,25 @@ function ConfirmStep({
 }) {
   const [status, setStatus] = useState('idle') // idle | paying | error
   const [errorMessage, setErrorMessage] = useState('')
+  const [balance, setBalance] = useState(null) // NIM in the wallet we're inside, once known
 
-  const canPay = extraFields.every((f) => f.optional || extraValues[f.key]?.trim())
+  // Check the wallet can cover this before offering Pay — a short balance is
+  // a clear message here, not a failed wallet prompt.
+  useEffect(() => {
+    let stopped = false
+    getAccount()
+      .then((address) => (address ? getBalanceNim(address) : null))
+      .then((nim) => {
+        if (!stopped && nim != null) setBalance(nim)
+      })
+      .catch(() => {})
+    return () => {
+      stopped = true
+    }
+  }, [])
+
+  const short = balance != null && balance < item.priceNim
+  const canPay = !short && extraFields.every((f) => f.optional || extraValues[f.key]?.trim())
 
   async function handlePay() {
     setStatus('paying')
@@ -257,7 +274,19 @@ function ConfirmStep({
           <span>Total</span>
           <span>{item.priceNim.toFixed(2)} NIM</span>
         </div>
+        {balance != null && (
+          <div className={`confirm-row confirm-row--balance${short ? ' confirm-row--short' : ''}`}>
+            <span>Your balance</span>
+            <span>{balance.toLocaleString(hostLocale(), { maximumFractionDigits: 2 })} NIM</span>
+          </div>
+        )}
       </div>
+
+      {short && (
+        <p className="search-error">
+          Not enough NIM for this — you need {(item.priceNim - balance).toFixed(2)} more.
+        </p>
+      )}
 
       {extraFields.map((f) => (
         <div className="field" key={f.key}>

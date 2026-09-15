@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import RevealItem from '../components/RevealItem'
-import { listOrders } from '../lib/history'
+import { listOrders, syncOrders } from '../lib/history'
+import { hostLocale } from '../lib/nimiqPay'
 import { SuccessStep } from './PurchaseFlow'
 
 const STATUS_LABEL = {
@@ -13,9 +14,10 @@ const STATUS_LABEL = {
 
 function formatWhen(ts) {
   const d = new Date(ts)
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) +
+  const locale = hostLocale()
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'short' }) +
     ' · ' +
-    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
 }
 
 // Live status for each stored receipt, fetched with its payment tx hash.
@@ -41,9 +43,20 @@ function useStatuses(orders) {
 }
 
 function History({ onBack }) {
-  const [orders] = useState(() => listOrders())
+  const [orders, setOrders] = useState(() => listOrders())
   const [open, setOpen] = useState(null)
   const statuses = useStatuses(orders)
+
+  // Pull in receipts filed under this device's id (survives a reinstall).
+  useEffect(() => {
+    let stopped = false
+    syncOrders().then((list) => {
+      if (!stopped) setOrders(list)
+    })
+    return () => {
+      stopped = true
+    }
+  }, [])
 
   if (open) {
     return (
@@ -105,7 +118,7 @@ function History({ onBack }) {
                     {status ? STATUS_LABEL[status] || status : '…'}
                   </span>
                   <span className="product-price">
-                    {Number(o.priceNim).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {Number(o.priceNim).toLocaleString(hostLocale(), { maximumFractionDigits: 2 })}
                     <span className="product-price-unit">NIM</span>
                     <span className="product-chevron" aria-hidden="true">&rarr;</span>
                   </span>

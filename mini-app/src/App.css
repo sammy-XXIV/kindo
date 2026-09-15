@@ -308,6 +308,39 @@
   color: var(--gold);
 }
 
+/* The wallet we're running inside, under the deck heading. */
+.wallet-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--mist);
+}
+
+.wallet-balance {
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.wallet-balance span {
+  font-size: 9.5px;
+  opacity: 0.85;
+}
+
+.confirm-row--balance span:last-child {
+  color: var(--mist);
+  font-weight: 500;
+}
+
+.confirm-row--short span:last-child {
+  color: var(--stamp);
+  font-weight: 700;
+}
+
 /* Crash screen (ErrorBoundary). */
 .crash {
   padding: 60px 28px;
