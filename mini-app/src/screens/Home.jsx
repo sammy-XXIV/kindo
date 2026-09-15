@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { getAccount, getBalanceNim, hostLocale } from '../lib/nimiqPay'
+import { getAccount, getBalanceNim, hostLocale, getConfig } from '../lib/nimiqPay'
 
 const NAV_ITEMS = [
   {
@@ -47,6 +47,19 @@ function Home({ onSelect, onBack, onHistory }) {
   const setWidthRef = useRef(0)
   const [active, setActive] = useState(0)
   const [wallet, setWallet] = useState(null) // { address, nim } once Nimiq Pay answers
+  const [paused, setPaused] = useState({}) // tiles whose provider isn't live yet, by id
+
+  // Dining goes live only once a Resy account is linked server-side; until
+  // then its pass is badged and doesn't open.
+  useEffect(() => {
+    let stopped = false
+    getConfig().then((c) => {
+      if (!stopped && c && c.dining === false) setPaused({ restaurants: 'Opening soon' })
+    })
+    return () => {
+      stopped = true
+    }
+  }, [])
 
   // The wallet we're inside: its address from the SDK, balance from chain.
   useEffect(() => {
@@ -147,16 +160,19 @@ function Home({ onSelect, onBack, onHistory }) {
       <div className="swipe-track" ref={trackRef} onScroll={handleScroll} role="list" aria-label="Kindo services">
         {LOOP.map((item, i) => {
           const n = i % N
+          const badge = paused[item.id]
           return (
             <button
               type="button"
               role="listitem"
-              className="pass-card"
+              className={`pass-card${badge ? ' pass-card--paused' : ''}`}
               key={`${item.id}-${i}`}
               aria-hidden={i < N || i >= 2 * N ? 'true' : undefined}
+              aria-disabled={badge ? 'true' : undefined}
               tabIndex={i < N || i >= 2 * N ? -1 : 0}
-              onClick={() => onSelect(item.id)}
+              onClick={() => !badge && onSelect(item.id)}
             >
+              {badge && <span className="pass-badge">{badge}</span>}
               <span className="pass-index" aria-hidden="true">
                 {String(n + 1).padStart(2, '0')}
               </span>
@@ -170,7 +186,7 @@ function Home({ onSelect, onBack, onHistory }) {
               </div>
               <div className="pass-foot">
                 <span className="pass-serial">NO. {String(n + 1).padStart(4, '0')} / {String(N).padStart(4, '0')}</span>
-                <span className="pass-cue">Tap to enter &rarr;</span>
+                <span className="pass-cue">{badge ? 'Not open yet' : <>Tap to enter &rarr;</>}</span>
               </div>
             </button>
           )

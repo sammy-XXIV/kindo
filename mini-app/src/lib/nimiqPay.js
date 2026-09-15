@@ -93,15 +93,18 @@ export function isInsideNimiqPay() {
 
 // Whether the backend is running in DEMO_MODE (no real funds). Cached after
 // the first check so the confirm screen can decide which pay path to take.
-let demoModePromise = null
-export function isDemoMode() {
-  if (!demoModePromise) {
-    demoModePromise = fetch('/api/config')
+let configPromise = null
+export function getConfig() {
+  if (!configPromise) {
+    configPromise = fetch('/api/config')
       .then((r) => r.json())
-      .then((c) => Boolean(c.demoMode))
-      .catch(() => false)
+      .catch(() => ({}))
   }
-  return demoModePromise
+  return configPromise
+}
+
+export function isDemoMode() {
+  return getConfig().then((c) => Boolean(c.demoMode))
 }
 
 // Demo stand-in for payWithNim: tells the backend to simulate the NIM payment

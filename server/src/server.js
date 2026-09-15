@@ -2,7 +2,7 @@ require('dotenv').config()
 const path = require('path')
 const express = require('express')
 const { searchFlights } = require('./brijClient')
-const { searchRestaurants } = require('./agentresClient')
+const { searchRestaurants, getMe } = require('./agentresClient')
 const { searchTopups, searchGiftCards, getProductDetail } = require('./bitrefillClient')
 const { getNimUsdRate, usdToNimSync } = require('./nimPrice')
 const { pollForPayments, getRecentTransactions } = require('./nimiqRpc')
@@ -439,8 +439,22 @@ app.get('/api/orders/:orderId', (req, res) => {
 
 // Lets the frontend know whether to take the real Nimiq Pay path or the
 // no-funds demo path.
-app.get('/api/config', (req, res) => {
-  res.json({ demoMode: process.env.DEMO_MODE === 'true' })
+// Dining is only live once a Resy account is linked to the wallet (a free
+// identity call to check, cached). The Home deck badges the tile until then.
+let diningCache = { at: 0, linked: false }
+async function diningLinked() {
+  if (Date.now() - diningCache.at < 5 * 60 * 1000) return diningCache.linked
+  try {
+    const me = await getMe()
+    diningCache = { at: Date.now(), linked: Boolean(me?.resy_linked) }
+  } catch {
+    diningCache = { at: Date.now(), linked: diningCache.linked }
+  }
+  return diningCache.linked
+}
+
+app.get('/api/config', async (req, res) => {
+  res.json({ demoMode: process.env.DEMO_MODE === 'true', dining: await diningLinked() })
 })
 
 // Watches Kindo's own Nimiq address for incoming payments and matches them

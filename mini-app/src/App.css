@@ -192,6 +192,38 @@
   border-color: var(--gold);
 }
 
+/* A pass whose provider isn't live yet: stamped, dimmed, doesn't open. */
+.pass-card--paused {
+  cursor: default;
+  border-color: rgba(233, 178, 19, 0.2);
+}
+
+.pass-card--paused:active {
+  transform: none;
+  border-color: rgba(233, 178, 19, 0.2);
+}
+
+.pass-card--paused .pass-body,
+.pass-card--paused .pass-serial {
+  opacity: 0.55;
+}
+
+.pass-badge {
+  position: absolute;
+  top: 72px; /* below the outlined index number */
+  right: 22px;
+  padding: 5px 9px;
+  border: 2px solid var(--stamp);
+  border-radius: 6px;
+  transform: rotate(6deg);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--stamp);
+}
+
 /* Foil chip — the membership-card cue */
 .pass-corner {
   position: absolute;
