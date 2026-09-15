@@ -92,3 +92,7 @@ server/     Express API + payment watcher + fulfilment bridge
 - **Paid provider calls are rate-limited** per IP (searches 8/min, the API 60/min)
   so an unthrottled endpoint can't drain the wallets.
 - Secrets live in `server/.env` (gitignored) and Railway variables.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
